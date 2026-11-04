@@ -2,6 +2,7 @@ import { CODE_NAMES, Code, isAbsence, isNight, isShift, isTwelveShift } from '..
 import type { MonthContext } from '../context';
 import type { ShiftName } from '../types';
 import { personMusts } from './personMusts';
+import { personWishes } from './personWishes';
 import type { PersonStats, Sink } from './types';
 
 /**
@@ -63,6 +64,6 @@ export function evaluatePerson(
     mustUnits: 0,
   };
   countMonth(ctx, row, stats);
-  const score = personMusts(ctx, p, row, stats, sink);
+  const score = personMusts(ctx, p, row, stats, sink) + personWishes(ctx, p, row, stats, sink);
   return { score, stats };
 }
