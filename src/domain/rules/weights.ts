@@ -1,0 +1,42 @@
+import type { Level, WishId } from '../types';
+
+/** Score of one broken must (M2-M5, M7, M8) or one person too many on a shift (M1). */
+export const HARD = 1e9;
+/** Score of one missing person on a shift (M1). */
+export const GAP = 1e6;
+/** Score of one hour below the working-time fund (M6). */
+export const BELOW_FPD = 1e5;
+
+/**
+ * Penalty of one unit of each wish at level 3. These are starting values: tuning the generator
+ * may change them.
+ */
+export const BASE_WEIGHTS: Record<WishId, number> = {
+  W1: 10,
+  W2: 20,
+  W3: 40,
+  W4a: 30,
+  W4b: 30,
+  W4c: 40,
+  W4d: 15,
+  W5a: 30,
+  W5b: 40,
+  W5c: 15,
+  W5d: 20,
+  W6: 8,
+  W7: 20,
+  W8: 10,
+  W9: 5,
+};
+
+/** The factor of each wish level, indexed by level: 0 switches the wish off, 5 is the strongest. */
+export const LEVEL_MULT: readonly number[] = [0, 0.25, 0.5, 1, 2, 4];
+
+/** The weight of each wish at the levels in the settings: base weight times the level's factor. */
+export function effectiveWeights(levels: Record<WishId, Level>): Record<WishId, number> {
+  const weights = {} as Record<WishId, number>;
+  for (const id of Object.keys(BASE_WEIGHTS) as WishId[]) {
+    weights[id] = BASE_WEIGHTS[id] * LEVEL_MULT[levels[id]];
+  }
+  return weights;
+}
