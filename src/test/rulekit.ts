@@ -1,7 +1,7 @@
 import { codeFromName } from '../domain/codes';
 import { buildMonthGrid } from '../domain/context';
 import type { MonthContext } from '../domain/context';
-import { newAppData, newPerson } from '../domain/defaults';
+import { defaultSettings, newAppData, newPerson } from '../domain/defaults';
 import { evaluateMonth } from '../domain/rules/evaluate';
 import type { MonthEval } from '../domain/rules/evaluate';
 import type { Finding, RuleId } from '../domain/rules/types';
@@ -77,6 +77,18 @@ export function rowsOf(ctx: MonthContext, month: string[], tail: string[] = []):
   });
 }
 
+/**
+ * Wish levels with every wish switched off (level 0): `ctxFor(m, n, { wishLevels: noWishes() })`.
+ * The weights of such a context are all 0, so whatever wishes the engine has, a score is the score
+ * of the musts alone. Use it in a test that compares an exact score. Findings of a wish may still
+ * be listed, with a penalty of 0, so filter on `severity` when comparing a list of findings.
+ */
+export function noWishes(): Settings['wishLevels'] {
+  const levels = defaultSettings().wishLevels; // a fresh object on every call
+  for (const id of Object.keys(levels) as WishId[]) levels[id] = 0;
+  return levels;
+}
+
 /** Evaluates a month with every finding listed. */
 export function run(ctx: MonthContext, rows: Uint8Array[]): MonthEval {
   return evaluateMonth(ctx, rows, true);
@@ -88,9 +100,11 @@ export function rules(ev: MonthEval, id: RuleId): Finding[] {
 }
 
 /**
- * How much of a rule there is in an evaluation: the number of findings for a must (M1 to M8), and
- * for a wish its penalties divided by its weight in `ctx`, so that the number does not depend on
- * the level of the wish. A wish switched off (weight 0) has no units.
+ * How much of a rule there is in an evaluation. For a wish: its penalties divided by its weight in
+ * `ctx`, so that the number does not depend on the level of the wish; a wish switched off (weight
+ * 0) has no units. For a must (M1 to M8) it counts findings, not units: one M1 finding can stand
+ * for several missing people (its penalty is GAP times the number missing), so a caller who wants
+ * people sums penalty / GAP.
  */
 export function units(ev: MonthEval, ctx: MonthContext, id: RuleId): number {
   const found = rules(ev, id);

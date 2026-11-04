@@ -4,7 +4,7 @@ import { defaultSettings, newPerson } from '../domain/defaults';
 import { evaluateMonth } from '../domain/rules/evaluate';
 import type { Finding } from '../domain/rules/types';
 import { BASE_WEIGHTS } from '../domain/rules/weights';
-import { ctxFor, rowsOf, rules, run, units } from './rulekit';
+import { ctxFor, noWishes, rowsOf, rules, run, units } from './rulekit';
 
 /** The non-empty cells of a row as [index, code] pairs. */
 const used = (row: Uint8Array) => Array.from(row).flatMap((v, i) => (v === Code.EMPTY ? [] : [[i, v]]));
@@ -78,7 +78,7 @@ describe('rowsOf', () => {
   });
 });
 
-describe('run, rules and units', () => {
+describe('run, rules, units and noWishes', () => {
   const c = ctxFor('2027-02', 1);
   const wish = (penalty: number): Finding =>
     ({ rule: 'W1', severity: 'wish', person: 0, days: [], message: 'přesčas', penalty });
@@ -93,7 +93,6 @@ describe('run, rules and units', () => {
     expect(rules(ev, 'M2').map((f) => f.rule)).toEqual(['M2']);
     expect(rules(ev, 'M6')).toHaveLength(1);
     expect(rules(ev, 'M7')).toEqual([]);
-    expect(rules(ev, 'W1')).toEqual([]);
   });
   it('units counts the findings of a must, whatever their penalty', () => {
     const ev = run(c, rowsOf(c, ['- - - - - R12 R12 | - - - - - R12 R12 | - - - - - R12']));
@@ -109,8 +108,16 @@ describe('run, rules and units', () => {
     expect(units(ev, strong, 'W1')).toBe(45 / (BASE_WEIGHTS.W1 * 4));
   });
   it('units of a wish that is switched off is 0, not NaN', () => {
-    const off = ctxFor('2027-02', 1, { wishLevels: { ...defaultSettings().wishLevels, W1: 0 } });
+    const off = ctxFor('2027-02', 1, { wishLevels: noWishes() });
     const ev = { ...run(off, rowsOf(off, [])), findings: [wish(0)] };
     expect(units(ev, off, 'W1')).toBe(0);
+  });
+  it('noWishes gives fresh levels with every wish off, so that every weight is 0', () => {
+    const levels = noWishes();
+    expect(Object.keys(levels).sort()).toEqual(Object.keys(defaultSettings().wishLevels).sort());
+    expect(Object.values(levels).every((level) => level === 0)).toBe(true);
+    expect(noWishes()).not.toBe(levels);
+    const off = ctxFor('2027-02', 1, { wishLevels: noWishes() });
+    expect(Object.values(off.weights).every((weight) => weight === 0)).toBe(true);
   });
 });

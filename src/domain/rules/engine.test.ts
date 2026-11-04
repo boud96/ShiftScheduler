@@ -1,8 +1,7 @@
 import { describe, it, expect, vi } from 'vitest';
-import { ctxFor, rowsOf, run } from '../../test/rulekit';
+import { ctxFor, noWishes, rowsOf, run } from '../../test/rulekit';
 import { defaultSettings } from '../defaults';
 import { fmtH } from '../format';
-import type { Settings } from '../types';
 import { evaluateDay } from './day';
 import { evaluateMonth } from './evaluate';
 import { evaluatePerson } from './person';
@@ -117,14 +116,14 @@ describe('evaluatePerson', () => {
   it('uses the preferences, the FPD and the active days of person p', () => {
     const t = ctxFor('2027-02', [{}, { prefs: { nights: 'never' } }, { activeFrom: '2027-02-15' }]);
     const row = rowsOf(t, ['N', 'N', 'N'])[0];
-    const rulesOf = (p: number) => {
+    const mustsOf = (p: number) => {
       const found: Finding[] = [];
       evaluatePerson(t, p, row, (f) => found.push(f));
-      return found.map((f) => f.rule).sort();
+      return found.filter((f) => f.severity === 'must').map((f) => f.rule).sort();
     };
-    expect(rulesOf(0)).toEqual(['M6']);
-    expect(rulesOf(1)).toEqual(['M6', 'M7']);
-    expect(rulesOf(2)).toEqual(['M3', 'M6']);
+    expect(mustsOf(0)).toEqual(['M6']);
+    expect(mustsOf(1)).toEqual(['M6', 'M7']);
+    expect(mustsOf(2)).toEqual(['M3', 'M6']);
     expect(evaluatePerson(t, 2, row).stats.mustUnits).toBe(2);
   });
   it('measures person p against the FPD of person p', () => {
@@ -146,7 +145,8 @@ describe('the sink', () => {
     const seen: Finding[] = [];
     const withSink = evaluatePerson(c, 0, row, (f) => seen.push(f));
     expect(withSink).toEqual(evaluatePerson(c, 0, row));
-    expect(seen.map((f) => f.rule).sort()).toEqual(['M2', 'M6', 'M8']);
+    const musts = seen.filter((f) => f.severity === 'must');
+    expect(musts.map((f) => f.rule).sort()).toEqual(['M2', 'M6', 'M8']);
   });
   it('gets every finding of a day, and changes nothing else', () => {
     const t = ctxFor('2027-02', 2);
@@ -176,7 +176,8 @@ describe('the sink', () => {
 
 describe('evaluateMonth', () => {
   it('sums the scores of the persons and the days, and counts the must units of both', () => {
-    const t = ctxFor('2027-02', 3);
+    // wishes off: the global wishes add a term of their own, which this sum leaves out
+    const t = ctxFor('2027-02', 3, { wishLevels: noWishes() });
     const rows = rowsOf(t, ['R1 R2 O', 'O R1 - N', 'N12 - - - - R12']);
     const ev = evaluateMonth(t, rows);
     let score = 0;
@@ -210,12 +211,9 @@ describe('evaluateMonth', () => {
     expect(musts.slice(-2).map((f) => [f.rule, f.person])).toEqual([['M6', 0], ['M6', 1]]);
   });
   it('scores what it lists: with the wishes off, the score is the sum of the penalties', () => {
-    const wishLevels = Object.fromEntries(
-      Object.keys(defaultSettings().wishLevels).map((id) => [id, 0]),
-    ) as Settings['wishLevels'];
     // person 1 joins on Thu 4 Feb and never works nights
     const joiner = { activeFrom: '2027-02-04', prefs: { nights: 'never' as const } };
-    const t = ctxFor('2027-02', [joiner, {}, {}], { wishLevels });
+    const t = ctxFor('2027-02', [joiner, {}, {}], { wishLevels: noWishes() });
     const ev = run(t, rowsOf(t, [
       'R1 N - N', // M3 on Mon and Tue, M7 on both nights
       `${five} | - - R12 R12`, // M5 and, on Tue and Wed, M8

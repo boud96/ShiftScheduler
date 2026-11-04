@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { ctxFor, rowsOf, run, rules } from '../../test/rulekit';
+import { ctxFor, noWishes, rowsOf, run, rules } from '../../test/rulekit';
 import { defaultSettings } from '../defaults';
 import { BELOW_FPD, GAP, HARD } from './weights';
 const c = ctxFor('2027-02', 1);
@@ -288,8 +288,10 @@ describe('M1 in detail', () => {
   });
 });
 
+// An exact score is the score of the musts alone only with the wishes off. At their default levels
+// a wish adds its own penalty, and the global wishes add a term of their own.
 describe('must units and scores', () => {
-  const k = ctxFor('2027-02', 1, { coverage: noCoverage });
+  const k = ctxFor('2027-02', 1, { coverage: noCoverage, wishLevels: noWishes() });
   it('count a unit per broken rule or shift over the limit, and one for being below FPD', () => {
     const rest = run(k, rowsOf(k, ['O R1']));
     expect(rest.persons[0].mustUnits).toBe(2); // M2 and M6
@@ -301,7 +303,8 @@ describe('must units and scores', () => {
     expect(twelve.score).toBe(2 * HARD + BELOW_FPD * (150 - 57.5));
   });
   it('count a missing person for each gap, and a person below FPD', () => {
-    const ev = run(c, rowsOf(c, []));
+    const bare = ctxFor('2027-02', 1, { wishLevels: noWishes() });
+    const ev = run(bare, rowsOf(bare, []));
     expect(ev.mustUnits).toBe(20 * 5 + 8 * 2 + 1);
     expect(ev.score).toBe((20 * 5 + 8 * 2) * GAP + BELOW_FPD * 150);
   });
