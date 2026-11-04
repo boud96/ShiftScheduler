@@ -415,11 +415,31 @@ describe('W4d in detail', () => {
     expect(u('N N N', 'W4d', x)).toBe(0);
     expect(rules(run(x, rowsOf(x, ['N N N'])), 'M7')).toHaveLength(3);
   });
-  it('scores the nights of someone who takes them as usual, with no text for the team lead', () => {
-    // The units of 'normal' are in the findings, because that is how the score is explained; a
-    // finding with no message is not for the checks list.
+  it('reports the nights of someone who takes them as usual in a quiet finding', () => {
+    // The units of 'normal' are in the findings, because that is how the score is explained;
+    // `quiet` keeps the finding out of the list of checks.
     const x = nights('normal');
-    expect(found('W4d', 'N N N', [], x).map((f) => f.message)).toEqual(['']);
+    expect(found('W4d', 'N N N', [], x)).toEqual([{
+      rule: 'W4d',
+      severity: 'wish',
+      person: 0,
+      days: [x.first, x.first + 1, x.first + 2],
+      message: '3× noční',
+      penalty: 3 * x.weights.W4d,
+      quiet: true,
+    }]);
+  });
+  it('does not make the nights of someone who takes them only if needed quiet', () => {
+    const x = nights('ifNeeded');
+    // strictly equal: there is no `quiet` field at all, not even an undefined one
+    expect(found('W4d', 'N N N', [], x)).toStrictEqual([{
+      rule: 'W4d',
+      severity: 'wish',
+      person: 0,
+      days: [x.first, x.first + 1, x.first + 2],
+      message: '3× noční, i když je bere jen v nouzi',
+      penalty: 12 * x.weights.W4d,
+    }]);
   });
 });
 
@@ -549,6 +569,10 @@ describe('the wishes on rows of any kind', () => {
         expect(f.severity).toBe('wish');
         expect(f.person).toBe(p);
         expect(f.penalty).toBeGreaterThan(0);
+        expect(f.message).not.toBe('');
+        // only the nights of someone who takes them as usual are quiet; no other has the field
+        const quiet = f.rule === 'W4d' && people[p].prefs?.nights === 'normal';
+        expect(f.quiet).toBe(quiet ? true : undefined);
         for (const d of f.days) expect(Number.isInteger(d) && d >= 0 && d < row.length).toBe(true);
         // a wish is reported only if it touches the month (W1 and the like name no day)
         if (f.days.length > 0) expect(Math.max(...f.days)).toBeGreaterThanOrEqual(t.first);
@@ -561,5 +585,54 @@ describe('the wishes on rows of any kind', () => {
       expect(mineOf(quiet)).toEqual([]);
     }
     expect(listedWishes).toBeGreaterThan(1000); // the rows really did fire wishes
+  });
+});
+
+describe('the findings of a month', () => {
+  // Four people and a month that breaks all eight musts and all of these wishes: coverage (M1),
+  // O -> R12 (M2), shifts before D joins (M3), nights before a request or an absence (M4), 8
+  // twelve-hour shifts for B (M5), hours below the FPD (M6), nights for D (M7), R12 on weekdays and
+  // N on a Sunday (M8). A takes nights as usual, so the month holds a quiet finding.
+  const team: PersonPatch[] = [
+    { prefs: { nights: 'normal' } },
+    { prefs: { nights: 'ifNeeded', afterNights: ['R1'] } },
+    { prefs: { nights: 'extra' } },
+    { prefs: { nights: 'never' }, activeFrom: '2027-02-08' },
+  ];
+  const strips = [
+    'R1 R2 R2 R1 O R12 R12 | - R2 R2 R2 R2 R12 - | R2 N N - R1 - N | N N - N N N -',
+    'R12 R12 R1 R1 R1 R12 R12 | R12 R12 R2 R2 N N N | N N - - R1 R12 R12',
+    'N x R1 R1 R1 R1 R1 | N DOV - - R2 R2 R2 | R2 R2 R2 R2 R2 - - | O O O O O - -',
+    'R1 R1 - - - - - | N N N - - - - | R2 R2 R2 R2 R2',
+  ];
+  const tails = ['R1 R1 R1 R1 R1 R1 R1', '- - - - N N N', '- - - - - N N'];
+  const levelSets: Array<[string, Settings['wishLevels']]> = [
+    ['the default levels', defaultSettings().wishLevels],
+    ['every wish off', noWishes()],
+    ['only these wishes on', onlyRhythm()],
+    ['every wish at 5', { ...defaultSettings().wishLevels, ...Object.fromEntries(
+      Object.keys(defaultSettings().wishLevels).map((id) => [id, 5])) }],
+    ['a mixture', { ...defaultSettings().wishLevels, W1: 0, W2: 1, W3: 5, W4a: 2, W4b: 4, W4c: 0 }],
+  ];
+
+  it('has a message on every finding, and a quiet one among them', () => {
+    const ctx = ctxFor('2027-02', team);
+    const ev = run(ctx, rowsOf(ctx, strips, tails));
+    expect(ev.findings.every((f) => f.message !== '')).toBe(true);
+    expect(ev.findings.some((f) => f.quiet === true)).toBe(true);
+    const seen = new Set(ev.findings.map((f) => f.rule));
+    for (const id of ['M1', 'M2', 'M3', 'M4', 'M5', 'M6', 'M7', 'M8', ...RHYTHM]) {
+      expect(seen).toContain(id); // the month really breaks every rule of this file and Task 4
+    }
+  });
+  it.each(levelSets)('with %s, the findings add up to the score', (_, wishLevels) => {
+    const ctx = ctxFor('2027-02', team, { wishLevels });
+    const ev = run(ctx, rowsOf(ctx, strips, tails));
+    const sum = ev.findings.reduce((total, f) => total + f.penalty, 0);
+    expect(ev.score).toBeGreaterThan(0);
+    // Every penalty of today's rules is a multiple of 0.25, so the sums agree exactly; a later
+    // wish may bring rounding errors (the score is about 4e10), hence the tolerance. A penalty that
+    // lacks a finding would be 1.25 or more.
+    expect(Math.abs(sum - ev.score)).toBeLessThan(1e-3);
   });
 });

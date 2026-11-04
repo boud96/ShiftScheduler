@@ -18,6 +18,8 @@ export interface Finding {
   message: string;
   /** What the finding adds to the score. */
   penalty: number;
+  /** True: it only accounts for part of the score, and the checks list does not show it. */
+  quiet?: boolean;
 }
 
 /** Receives each finding as it is found. Evaluating with no sink builds no findings and no text. */

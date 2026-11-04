@@ -2,7 +2,7 @@ import { CODE_NAMES, Code, isNight, isShift } from '../codes';
 import type { MonthContext } from '../context';
 import { days as fmtDays, fmtH } from '../format';
 import type { WishId } from '../types';
-import type { PersonStats, Sink } from './types';
+import type { Finding, PersonStats, Sink } from './types';
 
 /**
  * Overtime this small (in hours) is rounding noise in the sum of the hours, not overtime. M6 has
@@ -22,7 +22,10 @@ const MIN_NIGHT_RUN = 3;
 /** W4a: with more nights than this in a month, they should come in runs of about this many. */
 const NIGHT_RUN = 5;
 
-/** Hands a finding of a wish to the sink. Call it only when there is a sink. */
+/**
+ * Hands a finding of a wish to the sink. Call it only when there is a sink. A `quiet` finding is
+ * marked as such; any other has no `quiet` field at all.
+ */
 function report(
   sink: Sink,
   rule: WishId,
@@ -30,8 +33,11 @@ function report(
   days: number[],
   message: string,
   penalty: number,
+  quiet = false,
 ): void {
-  sink({ rule, severity: 'wish', person, days, message, penalty });
+  const finding: Finding = { rule, severity: 'wish', person, days, message, penalty };
+  if (quiet) finding.quiet = true;
+  sink(finding);
 }
 
 // The three helpers below build the `days` of a finding: call them only when there is a sink.
@@ -325,8 +331,8 @@ function nightRuns(
  * `ifNeeded`. Someone who never takes them has M7 instead.
  *
  * Only a night of an `ifNeeded` person is something to tell the team lead. The 1 per night of a
- * `normal` person is still reported, so that the findings add up to the score, but with no message:
- * a finding like that is for the score alone and does not belong in a list of checks.
+ * `normal` person is still reported, so that the findings add up to the score, but as a `quiet`
+ * finding: it is for the score alone and does not belong in a list of checks.
  */
 function willingness(
   ctx: MonthContext,
@@ -340,8 +346,11 @@ function willingness(
   if (cost === 0 || stats.nights === 0) return 0;
   const penalty = cost * stats.nights * ctx.weights.W4d;
   if (sink !== undefined && penalty > 0) {
-    const message = pref === 'ifNeeded' ? `${stats.nights}× noční, i když je bere jen v nouzi` : '';
-    report(sink, 'W4d', p, monthNights(ctx, row), message, penalty);
+    const needed = pref === 'ifNeeded';
+    const message = needed
+      ? `${stats.nights}× noční, i když je bere jen v nouzi`
+      : `${stats.nights}× noční`;
+    report(sink, 'W4d', p, monthNights(ctx, row), message, penalty, !needed);
   }
   return penalty;
 }
@@ -357,7 +366,9 @@ function willingness(
  * the month" is the last index of `row`.
  *
  * Without a `sink` no array, string or closure is created: every one in this file sits inside an
- * `if (sink !== undefined ...)`. A wish whose penalty is 0 (switched off) is not reported.
+ * `if (sink !== undefined ...)`. A wish whose penalty is 0 (switched off) is not reported. Every
+ * other penalty is carried by a finding, so that the findings add up to the score; the few that
+ * the checks list is not to show are `quiet`.
  */
 export function personWishes(
   ctx: MonthContext,
