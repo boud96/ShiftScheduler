@@ -1,8 +1,10 @@
 import { describe, it, expect } from 'vitest';
 import { Code } from '../domain/codes';
 import { defaultSettings, newPerson } from '../domain/defaults';
+import { evaluateMonth } from '../domain/rules/evaluate';
+import type { Finding } from '../domain/rules/types';
 import { BASE_WEIGHTS } from '../domain/rules/weights';
-import { ctxFor, rowsOf } from './rulekit';
+import { ctxFor, rowsOf, rules, run, units } from './rulekit';
 
 /** The non-empty cells of a row as [index, code] pairs. */
 const used = (row: Uint8Array) => Array.from(row).flatMap((v, i) => (v === Code.EMPTY ? [] : [[i, v]]));
@@ -73,5 +75,42 @@ describe('rowsOf', () => {
     expect(() => rowsOf(c, [Array(29).fill('R1').join(' ')])).toThrow('room for 28');
     expect(() => rowsOf(c, [], [Array(8).fill('N').join(' ')])).toThrow('room for 7');
     expect(() => rowsOf(c, ['R1', 'R1', 'R1', 'R1'])).toThrow('More strips than the 3 people');
+  });
+});
+
+describe('run, rules and units', () => {
+  const c = ctxFor('2027-02', 1);
+  const wish = (penalty: number): Finding =>
+    ({ rule: 'W1', severity: 'wish', person: 0, days: [], message: 'přesčas', penalty });
+
+  it('run evaluates the month with the explanations on', () => {
+    const rows = rowsOf(c, ['O R1']);
+    expect(run(c, rows)).toEqual(evaluateMonth(c, rows, true));
+    expect(run(c, rows).findings.length).toBeGreaterThan(0);
+  });
+  it('rules picks the findings of one rule, and gives none for a rule that found nothing', () => {
+    const ev = run(c, rowsOf(c, ['O R1']));
+    expect(rules(ev, 'M2').map((f) => f.rule)).toEqual(['M2']);
+    expect(rules(ev, 'M6')).toHaveLength(1);
+    expect(rules(ev, 'M7')).toEqual([]);
+    expect(rules(ev, 'W1')).toEqual([]);
+  });
+  it('units counts the findings of a must, whatever their penalty', () => {
+    const ev = run(c, rowsOf(c, ['- - - - - R12 R12 | - - - - - R12 R12 | - - - - - R12']));
+    expect(rules(ev, 'M5')[0].penalty).toBe(2e9); // two shifts over the maximum, in one finding
+    expect(units(ev, c, 'M5')).toBe(1);
+    expect(units(ev, c, 'M7')).toBe(0);
+  });
+  it('units divides the penalties of a wish by its weight', () => {
+    const ev = { ...run(c, rowsOf(c, [])), findings: [wish(30), wish(15)] };
+    expect(units(ev, c, 'W1')).toBe(45 / BASE_WEIGHTS.W1);
+    expect(units(ev, c, 'W2')).toBe(0);
+    const strong = ctxFor('2027-02', 1, { wishLevels: { ...defaultSettings().wishLevels, W1: 5 } });
+    expect(units(ev, strong, 'W1')).toBe(45 / (BASE_WEIGHTS.W1 * 4));
+  });
+  it('units of a wish that is switched off is 0, not NaN', () => {
+    const off = ctxFor('2027-02', 1, { wishLevels: { ...defaultSettings().wishLevels, W1: 0 } });
+    const ev = { ...run(off, rowsOf(off, [])), findings: [wish(0)] };
+    expect(units(ev, off, 'W1')).toBe(0);
   });
 });
