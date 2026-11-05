@@ -10,6 +10,61 @@
 
 **Spec:** `docs/superpowers/specs/2026-11-04-shift-scheduler-design.md`. Phase 1 scope is §14 of the spec. Phase 2 (closing months, Přehled, yearly DOV/MD, paste-back, whole-team copy, full Pravidla, weekly-rest warning) gets its own plan.
 
+## Progress (paused 2026-11-05)
+
+Work runs on branch `phase-1` (31 commits on top of `main`, nothing pushed), task by task with subagent-driven development: an implementer, a task review, then fixes.
+
+**Done**
+- Tasks 1–14: implemented, reviewed and complete (`90ce99f`..`bffe174`).
+- Task 15: implemented and committed (`1a26a69 feat: generate drafts in a worker`). The suite passes (1064 tests in 30 files), typecheck is clean, and the built page generates in a blob worker from `file://` in Chromium. **Its task review has not run yet.**
+
+**To do, in order**
+1. Review Task 15 over `bffe174..1a26a69` and fix what it finds. To judge: an extra `dispatch(action, ifLoads?)` guard in the store against a result landing after a file is opened; the hook also returns `percent` and `outcome`; the `Hotovo` line hides when the data is replaced.
+2. Task 16, paste dialog and row copy:
+   - show `PastePlan.namesColumn` in the dialog;
+   - the start person comes from the month grid;
+   - the row-copy button goes in the name cell (`th scope="row"`);
+   - tests that render `<App/>` query within the active tab panel;
+   - still to rule on: how the ignored values are listed, the names-column wording, and the text when copying fails.
+3. Task 17, rules screen:
+   - the W5a select is labelled `Držet se cíle 12h směn` (R3);
+   - consider moving the generic form pieces out of `PersonCard.tsx`;
+   - scope the generic CSS class names of the team screen.
+4. Task 18, e2e from the built file and the README:
+   - Chromium only, Firefox checked by hand (R6);
+   - `build.modulePreload: false` and a committed test that the CSP is enforced;
+   - R1/R2/O/O20 label two controls on every team card, so the test uses role + name;
+   - hidden tab panels stay mounted, so queries are scoped to the active panel;
+   - the month heading is the only `h2`, the arrows are named `◀`/`▶`, and `Kontrola` is a region whose summary reads `Musí: 0 · Přání: 0`.
+5. Final whole-branch review over `dfa9435..HEAD` on the most capable model, then one fix wave and one scoped re-review. The wave includes:
+   - R29: a refused write permission or a failed write to the held file falls through to the save picker;
+   - the deferred minor findings of Tasks 9–15 that the review keeps.
+6. Manual checks before delivery:
+   - Firefox: the page, the blob worker, the download fallback, the file input's cancel event;
+   - `requestPermission` after a long file pick;
+   - `crypto.randomUUID` on `file://`;
+   - focus behaviour.
+7. Finish the branch. Merging is the user's call.
+
+**Parked for Phase 2:**
+- reminders (R5);
+- the generator's construct step filling the most constrained slot first (R25);
+- keeping the file handle across reloads;
+- quoted cells in Excel paste;
+- arrow-key movement in the month grid;
+- re-checking RESTARTS = 6 against the measured 20 s worker run of January 2027: about 5.4 M iterations, 253–282k per second, no broken must in 6/6 runs.
+
+**Where the details are:**
+- The local, untracked ledger `.superpowers/sdd/2026-11-04-shift-scheduler-phase-1/progress.md` holds:
+  - every ruling (R1–R43), each with its reason and cost if wrong;
+  - the deferred minor findings;
+  - the carries between tasks.
+- The task briefs and reports sit next to it.
+- Where a ruling differs from this plan's text, the ruling wins. Examples:
+  - W9's message is `nevyrovnaný počet R2` (R42);
+  - `applyGenerated` carries `personIds`, `fixed` and `generatedAt` (R1, R32, R37);
+  - the open confirmation is an in-page dialog (R38).
+
 ## Global Constraints
 
 - One self-contained `dist/index.html`. It works offline from disk in current Edge, Chrome and Firefox. No network request of any kind at runtime, and no CDN.
@@ -103,7 +158,7 @@ Unit tests sit next to their source as `*.test.ts(x)`. UI tests start with `// @
 **Interfaces:**
 - Produces: npm scripts `dev`, `build` (`tsc --noEmit && vite build`), `test` (`vitest run`), `test:e2e` (`npm run build && playwright test`), `typecheck`. Build output `dist/index.html`.
 
-- [ ] **Step 1: Create the project files**
+- [x] **Step 1: Create the project files**
 
 Install the dependencies:
 - `npm install react react-dom`
@@ -122,7 +177,7 @@ Project settings:
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline' blob:; style-src 'unsafe-inline'; img-src data: blob:; font-src data:; worker-src blob:; connect-src 'none'; base-uri 'none'; form-action 'none'">
 ```
 
-- [ ] **Step 2: Write the smoke test** in `tests/e2e/smoke.spec.ts`
+- [x] **Step 2: Write the smoke test** in `tests/e2e/smoke.spec.ts`
 
 ```ts
 import { test, expect } from '@playwright/test';
@@ -146,9 +201,9 @@ test('build is a single file with a CSP that blocks connections', () => {
 });
 ```
 
-- [ ] **Step 3: Run it.** Command: `npm run test:e2e`. Expected: 2 passed. If it fails, fix the config, not the test.
-- [ ] **Step 4: Typecheck.** Command: `npm run typecheck`. Expected: no errors.
-- [ ] **Step 5: Commit** (only if approved): `git add -A && git commit -m "chore: scaffold single-file Vite + React app"`
+- [x] **Step 3: Run it.** Command: `npm run test:e2e`. Expected: 2 passed. If it fails, fix the config, not the test.
+- [x] **Step 4: Typecheck.** Command: `npm run typecheck`. Expected: no errors.
+- [x] **Step 5: Commit** (only if approved): `git add -A && git commit -m "chore: scaffold single-file Vite + React app"`
 
 ---
 
@@ -194,7 +249,7 @@ test('build is a single file with a CSP that blocks connections', () => {
   - `fmtH(h): string`: `8` gives `'8'`, `127.5` gives `'127,5'`
   - `days(n): string`: `1` gives `'1 den'`, `3` gives `'3 dny'`, `5` gives `'5 dní'`
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 ```ts
 // src/domain/calendar.test.ts
@@ -251,14 +306,14 @@ describe('calendar', () => {
 
 `format.test.ts` covers the four `fmtH` and `days` examples above.
 
-- [ ] **Step 2: Run.** Command: `npx vitest run src/domain`. Expected: FAIL (modules missing).
-- [ ] **Step 3: Implement** `types.ts`, `codes.ts`, `defaults.ts`, `format.ts`, `calendar.ts` as specified in Interfaces.
+- [x] **Step 2: Run.** Command: `npx vitest run src/domain`. Expected: FAIL (modules missing).
+- [x] **Step 3: Implement** `types.ts`, `codes.ts`, `defaults.ts`, `format.ts`, `calendar.ts` as specified in Interfaces.
   - Use the anonymous Gregorian algorithm for Easter.
   - Build dates with `Date.UTC` and read them back with `getUTC*`.
   - A day is `'twelve'` when it is a Saturday, Sunday or holiday, unless `dayTypeOverrides` says otherwise.
   - `festive` means the date's `MM-DD` is in `settings.festiveDays`.
-- [ ] **Step 4: Run.** Command: `npx vitest run src/domain`. Expected: PASS.
-- [ ] **Step 5: Commit:** `git commit -am "feat: calendar, codes and defaults"` (add the new files first)
+- [x] **Step 4: Run.** Command: `npx vitest run src/domain`. Expected: PASS.
+- [x] **Step 5: Commit:** `git commit -am "feat: calendar, codes and defaults"` (add the new files first)
 
 ---
 
@@ -303,7 +358,7 @@ describe('calendar', () => {
   - `ctxFor(month, people: number | PersonPatch[], settings?: Partial<Settings>): MonthContext`, built from `newPerson` data via `buildMonthGrid`
   - `rowsOf(ctx, month: string[], tail?: string[]): Uint8Array[]`. One strip per person, made of space-separated codes. A month strip starts at the month's day 1 and a tail strip covers the 7 tail days. `-` means empty and `|` is ignored. Missing positions are empty.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 ```ts
 // src/domain/context.test.ts
@@ -376,10 +431,10 @@ it('wish levels scale the base weights', () => {
 });
 ```
 
-- [ ] **Step 2: Run.** Command: `npx vitest run src/domain/context.test.ts`. Expected: FAIL.
-- [ ] **Step 3: Implement** `context.ts`, `rules/weights.ts`, `src/test/team.ts` and `src/test/rulekit.ts` per Interfaces.
-- [ ] **Step 4: Run.** Command: `npx vitest run src/domain`. Expected: PASS.
-- [ ] **Step 5: Commit:** `feat: month context and test kit`
+- [x] **Step 2: Run.** Command: `npx vitest run src/domain/context.test.ts`. Expected: FAIL.
+- [x] **Step 3: Implement** `context.ts`, `rules/weights.ts`, `src/test/team.ts` and `src/test/rulekit.ts` per Interfaces.
+- [x] **Step 4: Run.** Command: `npx vitest run src/domain`. Expected: PASS.
+- [x] **Step 5: Commit:** `feat: month context and test kit`
 
 ---
 
@@ -423,7 +478,7 @@ it('wish levels scale the base weights', () => {
 
 `mustUnits` counts every HARD unit, every missing person (GAP) and every person below FPD.
 
-- [ ] **Step 1: Write the failing tests.** February 2027 starts on a Monday, so index i is weekday i mod 7, and the weekends are indices 5–6, 12–13, 19–20 and 26–27.
+- [x] **Step 1: Write the failing tests.** February 2027 starts on a Monday, so index i is weekday i mod 7, and the weekends are indices 5–6, 12–13, 19–20 and 26–27.
 
 ```ts
 // src/domain/rules/musts.test.ts
@@ -487,10 +542,10 @@ describe('musts', () => {
 });
 ```
 
-- [ ] **Step 2: Run.** Command: `npx vitest run src/domain/rules`. Expected: FAIL.
-- [ ] **Step 3: Implement** the files listed, per the table. `evaluateMonth` keeps a `globalScore` term of `0` until Task 7.
-- [ ] **Step 4: Run.** Command: `npx vitest run src/domain`. Expected: PASS.
-- [ ] **Step 5: Commit:** `feat: rule engine musts`
+- [x] **Step 2: Run.** Command: `npx vitest run src/domain/rules`. Expected: FAIL.
+- [x] **Step 3: Implement** the files listed, per the table. `evaluateMonth` keeps a `globalScore` term of `0` until Task 7.
+- [x] **Step 4: Run.** Command: `npx vitest run src/domain`. Expected: PASS.
+- [x] **Step 5: Commit:** `feat: rule engine musts`
 
 ---
 
@@ -517,7 +572,7 @@ describe('musts', () => {
 | W4c | For a run ending at e, let k be the off days from e+1 to the next shift. If there is no next shift in the row, or k ≥ 2, add 0. If k = 1, the next code being in {O20, O} ∪ `afterNights` adds 1; any other code adds 2. | `po nočních jen 1 den volna` / `po nočních jen 1 den volna a pak ${code}` |
 | W4d | Per month night: `extra` 0, `normal` 1, `ifNeeded` 4. Findings only for `ifNeeded`. | `${n}× noční, i když je bere jen v nouzi` |
 
-- [ ] **Step 1: Write the failing tests** (February 2027, one person, FPD 150)
+- [x] **Step 1: Write the failing tests** (February 2027, one person, FPD 150)
 
 ```ts
 // src/domain/rules/wishes-rhythm.test.ts
@@ -572,10 +627,10 @@ describe('rhythm wishes', () => {
 });
 ```
 
-- [ ] **Step 2: Run.** Command: `npx vitest run src/domain/rules/wishes-rhythm.test.ts`. Expected: FAIL.
-- [ ] **Step 3: Implement** `personWishes.ts` (W1–W4) per the table, and wire it into `evaluatePerson`.
-- [ ] **Step 4: Run.** Command: `npx vitest run src/domain`. Expected: PASS.
-- [ ] **Step 5: Commit:** `feat: rhythm and night wishes`
+- [x] **Step 2: Run.** Command: `npx vitest run src/domain/rules/wishes-rhythm.test.ts`. Expected: FAIL.
+- [x] **Step 3: Implement** `personWishes.ts` (W1–W4) per the table, and wire it into `evaluatePerson`.
+- [x] **Step 4: Run.** Command: `npx vitest run src/domain`. Expected: PASS.
+- [x] **Step 5: Commit:** `feat: rhythm and night wishes`
 
 ---
 
@@ -598,7 +653,7 @@ describe('rhythm wishes', () => {
 | W5d | For each R12, each neighbouring day holding a weekday shift other than R1 or R2 adds 1 | `vedle R12 je ${code} (lépe R1 nebo R2)` |
 | W6 | Per month weekday shift, the rating (missing counts as 3) gives 5→0, 4→1, 3→2, 2→4, 1→6. For a person with no ratings at all, use Σ over R1, R2, O20, O, N of \|count − total/5\| instead. Findings only for ratings ≤ 2. | `${n}× ${code}, kterou má nerad(a)` |
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 ```ts
 // src/domain/rules/wishes-weekend.test.ts
@@ -639,10 +694,10 @@ describe('weekend and preference wishes', () => {
 });
 ```
 
-- [ ] **Step 2: Run.** Command: `npx vitest run src/domain/rules/wishes-weekend.test.ts`. Expected: FAIL.
-- [ ] **Step 3: Implement** W5a–W5d and W6 in `personWishes.ts`.
-- [ ] **Step 4: Run.** Command: `npx vitest run src/domain`. Expected: PASS.
-- [ ] **Step 5: Commit:** `feat: weekend and preference wishes`
+- [x] **Step 2: Run.** Command: `npx vitest run src/domain/rules/wishes-weekend.test.ts`. Expected: FAIL.
+- [x] **Step 3: Implement** W5a–W5d and W6 in `personWishes.ts`.
+- [x] **Step 4: Run.** Command: `npx vitest run src/domain`. Expected: PASS.
+- [x] **Step 5: Commit:** `feat: weekend and preference wishes`
 
 ---
 
@@ -664,7 +719,7 @@ describe('weekend and preference wishes', () => {
 | W8 | For each R1, R2, O20, O, N with ≥ 2 people rating it ≤ 2: add Σ over those people of (count − their mean)² | `${code} rozdělené nerovnoměrně mezi ty, kdo ji nemají rádi` |
 | W9 | Over month weekdays: Σ (r2 − mean r2)². One finding, listing days with \|r2 − mean\| ≥ 2. | `nevyrovnaný počet R2: ${dates}` |
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 ```ts
 // src/domain/rules/global.test.ts
@@ -701,10 +756,10 @@ describe('global wishes', () => {
 
 (W7 heavy: T = 8 and 1, so the mean is 4.5 and 2 · 3.5² = 24.5. Light: T = 6 and 3, so 2 · 1.5² = 4.5. Nights: T = 2 and 0, so 2 · 1² = 2.)
 
-- [ ] **Step 2: Run.** Command: `npx vitest run src/domain/rules/global.test.ts`. Expected: FAIL.
-- [ ] **Step 3: Implement** `global.ts`, and wire the global score into `evaluateMonth`.
-- [ ] **Step 4: Run.** Command: `npx vitest run src/domain`. Expected: PASS.
-- [ ] **Step 5: Commit:** `feat: fairness and global wishes`
+- [x] **Step 2: Run.** Command: `npx vitest run src/domain/rules/global.test.ts`. Expected: FAIL.
+- [x] **Step 3: Implement** `global.ts`, and wire the global score into `evaluateMonth`.
+- [x] **Step 4: Run.** Command: `npx vitest run src/domain`. Expected: PASS.
+- [x] **Step 5: Commit:** `feat: fairness and global wishes`
 
 ---
 
@@ -741,7 +796,7 @@ describe('global wishes', () => {
   - Temperature per segment: `T = 60 · (0.3/60)^(i/len)`. Accept a move if delta ≤ 0 or `rnd() < exp(−delta/T)`, and snapshot on each new best.
   - Every `progressEvery` iterations: `await new Promise(r => setTimeout(r, 0))`, call `onProgress`, then stop if `shouldStop?.()` or the time budget has run out.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 ```ts
 // src/generator/search.test.ts
@@ -802,10 +857,10 @@ describe('generator core', () => {
 });
 ```
 
-- [ ] **Step 2: Run.** Command: `npx vitest run src/generator`. Expected: FAIL.
-- [ ] **Step 3: Implement** the five files per the Interfaces and Decisions above.
-- [ ] **Step 4: Run.** Command: `npx vitest run src/generator`. Expected: PASS.
-- [ ] **Step 5: Commit:** `feat: local-search generator core`
+- [x] **Step 2: Run.** Command: `npx vitest run src/generator`. Expected: FAIL.
+- [x] **Step 3: Implement** the five files per the Interfaces and Decisions above.
+- [x] **Step 4: Run.** Command: `npx vitest run src/generator`. Expected: PASS.
+- [x] **Step 5: Commit:** `feat: local-search generator core`
 
 ---
 
@@ -839,7 +894,7 @@ describe('generator core', () => {
   - **`impossible`**: `feb2027`, plus x for A–G on Feb 13 and Feb 14.
   - **`pins`**: `jan2027`, plus D pinned to N on Jan 11–15.
 
-- [ ] **Step 1: Write the scenario tests.** Run each scenario through `search` (seed 1, `maxIterations: 300_000`, timeout 120 s), plus `jan2027` with seeds 2 and 3. Then evaluate with `evaluateMonth(ctx, rows, true)` and assert:
+- [x] **Step 1: Write the scenario tests.** Run each scenario through `search` (seed 1, `maxIterations: 300_000`, timeout 120 s), plus `jan2027` with seeds 2 and 3. Then evaluate with `evaluateMonth(ctx, rows, true)` and assert:
   - Every scenario except `impossible`: `mustUnits === 0`.
   - `feb2027`: every person has `twelve === 2` and `hours − fpd === 0.5`.
   - `jan2027` (all three seeds):
@@ -854,14 +909,14 @@ describe('generator core', () => {
     - M1 gap findings sum to exactly 2 missing people, all on Feb 13–14;
     - no other M1 findings.
   - `pins`: D's cells on Jan 11–15 are still N.
-- [ ] **Step 2: Run.** Command: `npx vitest run src/generator/scenarios.test.ts`. Expected: some may FAIL at first.
-- [ ] **Step 3: Tune until every assertion passes.**
+- [x] **Step 2: Run.** Command: `npx vitest run src/generator/scenarios.test.ts`. Expected: some may FAIL at first.
+- [x] **Step 3: Tune until every assertion passes.**
   - Change only `BASE_WEIGHTS`, the temperatures, the move probabilities and restarts, and `construct`'s tie-breaking.
   - Never weaken an assertion or the rule semantics.
   - Keep the whole file under 3 minutes.
   - If a scenario still fails after reasonable tuning, stop and report it with the failing numbers.
-- [ ] **Step 4: Run the full suite.** Command: `npm test`. Expected: PASS.
-- [ ] **Step 5: Commit:** `test: generator scenarios; tune weights`, listing the final weight changes in the body
+- [x] **Step 4: Run the full suite.** Command: `npm test`. Expected: PASS.
+- [x] **Step 5: Commit:** `test: generator scenarios; tune weights`, listing the final weight changes in the body
 
 ---
 
@@ -889,7 +944,7 @@ describe('generator core', () => {
     - File System Access (`showOpenFilePicker` / `showSaveFilePicker`, with the handle kept in memory) when available, otherwise `<input type=file>` and an `a[download]` download;
     - suggested file name `plan-smen.json`.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 ```ts
 // src/storage/saveFile.test.ts
@@ -920,10 +975,10 @@ describe('save file', () => {
 - a corrupt cache value makes `loadCache()` return `null` and leaves the stored value in place;
 - `memoryStorage().saveFile(d)` records the serialized text.
 
-- [ ] **Step 2: Run.** Command: `npx vitest run src/storage`. Expected: FAIL.
-- [ ] **Step 3: Implement** both files.
-- [ ] **Step 4: Run.** Command: `npx vitest run src/storage`. Expected: PASS.
-- [ ] **Step 5: Commit:** `feat: save file and storage adapters`
+- [x] **Step 2: Run.** Command: `npx vitest run src/storage`. Expected: FAIL.
+- [x] **Step 3: Implement** both files.
+- [x] **Step 4: Run.** Command: `npx vitest run src/storage`. Expected: PASS.
+- [x] **Step 5: Commit:** `feat: save file and storage adapters`
 
 ---
 
@@ -946,7 +1001,7 @@ describe('save file', () => {
     - If every non-empty value in column 0 is unrecognised, column 0 is dropped (a names column) and its values are not listed.
   - `applyPaste(data, plan): AppData`: shifts are written pinned (`{code, pinned: true}`), absences and x as `{code}`.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 ```ts
 // src/clipboard/tsv.test.ts
@@ -984,10 +1039,10 @@ describe('tsv', () => {
 
 (In the third test, row 3 lands on person 3. Its values `1 2 0` sit under dates, so they are ignored. Column 0 holds only names and `Celkem`, so it is dropped.)
 
-- [ ] **Step 2: Run.** Command: `npx vitest run src/clipboard`. Expected: FAIL.
-- [ ] **Step 3: Implement** `tsv.ts`.
-- [ ] **Step 4: Run.** Command: `npx vitest run src/clipboard`. Expected: PASS.
-- [ ] **Step 5: Commit:** `feat: Excel copy and paste`
+- [x] **Step 2: Run.** Command: `npx vitest run src/clipboard`. Expected: FAIL.
+- [x] **Step 3: Implement** `tsv.ts`.
+- [x] **Step 4: Run.** Command: `npx vitest run src/clipboard`. Expected: PASS.
+- [x] **Step 5: Commit:** `feat: Excel copy and paste`
 
 ---
 
@@ -1029,7 +1084,7 @@ describe('tsv', () => {
   - Start screen: heading `Plánování směn`, buttons `Otevřít soubor` and `Začít nový`, plus one sentence explaining that data stays on this computer.
   - Save bar: `Ukládá se automaticky do ${name}` when auto, `Uloženo do souboru ${time}` when saved, `Změny nejsou uložené do souboru` when dirty. Buttons `Uložit do souboru` and `Otevřít soubor`.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
   - `reducer.test.ts`, one test per action:
     - `togglePin` ignores a cell holding x;
     - `removePerson` removes that person's cells;
@@ -1069,12 +1124,12 @@ it('keeps data and shows the error when a file is broken', async () => {
 ```
 
   `src/worker/runner.ts` is created in this task with the `GeneratorRunner` type and an `inProcessRunner` that calls `search` directly. Task 15 adds `workerRunner`.
-- [ ] **Step 2: Run.** Command: `npx vitest run src/ui`. Expected: FAIL.
-- [ ] **Step 3: Implement** the listed files, plus `runner.ts` with:
+- [x] **Step 2: Run.** Command: `npx vitest run src/ui`. Expected: FAIL.
+- [x] **Step 3: Implement** the listed files, plus `runner.ts` with:
   - `GeneratorRunner = (input: { ctx; rows; fixed; seed; maxIterations; timeBudgetMs }, onProgress: (p: SearchProgress) => void) => { result: Promise<SearchResult>; stop(): void }`
   - `inProcessRunner`
-- [ ] **Step 4: Run.** Command: `npx vitest run src/ui`. Expected: PASS.
-- [ ] **Step 5: Commit:** `feat: app shell, start screen and save bar`
+- [x] **Step 4: Run.** Command: `npx vitest run src/ui`. Expected: PASS.
+- [x] **Step 5: Commit:** `feat: app shell, start screen and save bar`
 
 ---
 
@@ -1101,16 +1156,16 @@ it('keeps data and shows the error when a file is broken', async () => {
   - a `Odebrat` button behind `window.confirm`.
 - The `Přidat člověka` button adds a person.
 
-- [ ] **Step 1: Write the failing tests** (jsdom, with `memoryStorage(newAppData())`):
+- [x] **Step 1: Write the failing tests** (jsdom, with `memoryStorage(newAppData())`):
   - Typing a new name into the first `Jméno` updates the value shown.
   - Choosing `Rád budu brát noční směny i za mé kolegy, pokud je to možné.` in the first `Noční` select makes `useApp().data.people[0].prefs.nights === 'extra'`. Read it through a test probe component.
   - `Přidat člověka` gives 9 `Jméno` inputs.
   - `Odebrat` with `confirm` mocked to `true` gives 7.
   - ↓ on the first card makes the second name first.
-- [ ] **Step 2: Run.** Command: `npx vitest run src/ui/team`. Expected: FAIL.
-- [ ] **Step 3: Implement** `TeamScreen` and `PersonCard`, and wire the tab.
-- [ ] **Step 4: Run.** Command: `npx vitest run src/ui`. Expected: PASS.
-- [ ] **Step 5: Commit:** `feat: team screen with preference cards`
+- [x] **Step 2: Run.** Command: `npx vitest run src/ui/team`. Expected: FAIL.
+- [x] **Step 3: Implement** `TeamScreen` and `PersonCard`, and wire the tab.
+- [x] **Step 4: Run.** Command: `npx vitest run src/ui`. Expected: PASS.
+- [x] **Step 5: Commit:** `feat: team screen with preference cards`
 
 ---
 
@@ -1139,7 +1194,7 @@ it('keeps data and shows the error when a file is broken', async () => {
   - **Coverage row** `Obsazeno`, with `data-testid="coverage-${date}"`: `✓`, or the M1 messages joined with `, `.
   - **ChecksPanel** heading `Kontrola`, then the summary `Musí: ${mustCount} · Přání: ${wishCount}`. Musts are listed first (red), then wishes (amber). Each line reads `${name} · ${d. m.}: ${message}`, or just the message for global findings. Clicking a line selects it.
 
-- [ ] **Step 1: Write the failing tests** (jsdom). Data: `newAppData()` with `syntheticTeam()`, viewing `2027-01`. Set the month with a `initialMonth` prop on `MonthScreen` (default: next month).
+- [x] **Step 1: Write the failing tests** (jsdom). Data: `newAppData()` with `syntheticTeam()`, viewing `2027-01`. Set the month with a `initialMonth` prop on `MonthScreen` (default: next month).
 
 ```tsx
 it('edits a cell and reacts with checks and totals', async () => {
@@ -1162,10 +1217,10 @@ it('offers only 12-hour shifts on a weekend', async () => {
 });
 ```
 
-- [ ] **Step 2: Run.** Command: `npx vitest run src/ui/month`. Expected: FAIL.
-- [ ] **Step 3: Implement** the four components and the styles.
-- [ ] **Step 4: Run.** Command: `npx vitest run src/ui`. Expected: PASS.
-- [ ] **Step 5: Commit:** `feat: month grid with live checks`
+- [x] **Step 2: Run.** Command: `npx vitest run src/ui/month`. Expected: FAIL.
+- [x] **Step 3: Implement** the four components and the styles.
+- [x] **Step 4: Run.** Command: `npx vitest run src/ui`. Expected: PASS.
+- [x] **Step 5: Commit:** `feat: month grid with live checks`
 
 ---
 
@@ -1191,16 +1246,16 @@ it('offers only 12-hour shifts on a weekend', async () => {
   - While generating it shows `Generuji… ${Math.round(elapsed/budget*100)} %` and a `Zastavit` button.
   - When finished it shows `Hotovo. Porušená pravidla: ${mustUnits}`.
 
-- [ ] **Step 1: Write the failing test** (jsdom; uses `inProcessRunner`). Data: `scenario('jan2027').data` with `generatorTimeBudgetSec: 1`. Steps:
+- [x] **Step 1: Write the failing test** (jsdom; uses `inProcessRunner`). Data: `scenario('jan2027').data` with `generatorTimeBudgetSec: 1`. Steps:
   - click `Vygenerovat`;
   - await `Hotovo`;
   - assert that the status badge reads `Návrh`;
   - assert that `coverage-2027-01-04` reads `✓`;
   - assert that `cell-A-2027-01-01` still shows `x`.
-- [ ] **Step 2: Run.** Command: `npx vitest run src/ui/month/generate.test.tsx`. Expected: FAIL.
-- [ ] **Step 3: Implement** the protocol, the worker (which runs `search` and handles `stop` through `shouldStop`), `workerRunner`, `useGenerator`, and the button area.
-- [ ] **Step 4: Run.** Command: `npx vitest run src/ui`. Expected: PASS.
-- [ ] **Step 5: Commit:** `feat: generate drafts in a worker`
+- [x] **Step 2: Run.** Command: `npx vitest run src/ui/month/generate.test.tsx`. Expected: FAIL.
+- [x] **Step 3: Implement** the protocol, the worker (which runs `search` and handles `stop` through `shouldStop`), `workerRunner`, `useGenerator`, and the button area.
+- [x] **Step 4: Run.** Command: `npx vitest run src/ui`. Expected: PASS.
+- [x] **Step 5: Commit:** `feat: generate drafts in a worker`
 
 ---
 
