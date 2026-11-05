@@ -250,7 +250,8 @@ describe('W5c in detail', () => {
   const none = solo({ afterWeekend: 'noAutomatic' });
   const indifferent = solo({ afterWeekend: 'any' });
   const weekend = '- - R2 R2 R2 R12 R12'; // Wed to Sun
-  const off = ['-', 'x', 'DOV', 'MD', 'OP', 'NEM'];
+  /** A request or an absence: a day off that is the person's own, not one the plan hands out. */
+  const own = ['x', 'DOV', 'MD', 'OP', 'NEM'];
 
   it('want: lists a shift on the Monday, with the cells and the text', () => {
     expect(listed(found('W5c', `${weekend} | R1`, [], want), want)).toEqual([
@@ -262,13 +263,30 @@ describe('W5c in detail', () => {
     }
   });
   it('want: asks nothing of a Monday that is off, whatever the day off is', () => {
-    for (const code of off) expect(unitsOf('W5c', `${weekend} | ${code}`, want)).toBe(0);
+    for (const code of ['-', ...own]) {
+      expect(unitsOf('W5c', `${weekend} | ${code}`, want)).toBe(0);
+    }
   });
-  it('noAutomatic: lists a Monday that is off, with the cells and the text', () => {
+  it('noAutomatic: lists an empty Monday, a day off handed out, with cells and text', () => {
     expect(listed(found('W5c', `${weekend} | -`, [], none), none)).toEqual([
       { message: 'po víkendu volno, i když ho nechce', days: [5, 6, 7], units: 1 },
     ]);
-    for (const code of off) expect(unitsOf('W5c', `${weekend} | ${code}`, none)).toBe(1);
+    expect(unitsOf('W5c', weekend, none)).toBe(1); // the Monday is left out of the strip: empty
+  });
+  it.each(own)('noAutomatic: asks nothing of %s on the Monday, an own day off', (code) => {
+    expect(found('W5c', `${weekend} | ${code}`, [], none)).toEqual([]);
+    expect(unitsOf('W5c', `${weekend} | ${code}`, none)).toBe(0);
+  });
+  it('noAutomatic: counts only the empty Mondays among the Mondays after weekends', () => {
+    // Mondays after the three weekends: DOV, empty, x
+    const strip = at({
+      5: 'R12', 6: 'R12', 7: 'DOV', 12: 'R12', 13: 'R12', 19: 'R12', 20: 'R12', 21: 'x',
+    });
+    expect(listed(found('W5c', strip, [], none), none)).toEqual([
+      { message: 'po víkendu volno, i když ho nechce', days: [12, 13, 14], units: 1 },
+    ]);
+    // someone who wants days off after a weekend is satisfied by all three
+    expect(unitsOf('W5c', strip, want)).toBe(0);
   });
   it('noAutomatic: asks nothing of a Monday with a shift', () => {
     for (const code of ['R1', 'R2', 'O20', 'O', 'N', 'R12', 'N12']) {
@@ -474,7 +492,7 @@ describe('the wishes W5 and W6 on rows of any kind', () => {
     const fired: Record<string, number> = {
       W5a: 0, W5b: 0, W5c: 0, W5d: 0, W6: 0, shown: 0, quiet: 0,
     };
-    for (let k = 0; k < 600; k++) {
+    for (let k = 0; k < 900; k++) {
       const { on, off } = months[k % months.length];
       const row = new Uint8Array(on.days.length);
       const shifty = random() < 0.5 ? 0.85 : 0.45; // some rows are dense, some sparse

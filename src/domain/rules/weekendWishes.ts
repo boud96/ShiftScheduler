@@ -69,13 +69,15 @@ function weekends(ctx: MonthContext, p: number, row: Uint8Array, sink?: Sink): n
       }
     }
 
-    // W5c: after R12 on both days, the Monday should be off for someone who wants days off after
-    // a weekend, and a shift for someone who does not want them handed out
+    // W5c: after R12 on both days, the Monday should hold no shift for someone who wants days off
+    // after a weekend. Someone who does not want days off handed out should not have an empty
+    // Monday; an x or an absence there is their own day off, not one the plan hands out.
     if (afterWeekend !== 'any' && a === Code.R12 && b === Code.R12) {
       const monday = sat + 2;
       if (monday < n && days[monday].dayType === 'weekday') {
-        const works = isShift(row[monday]);
-        if (afterWeekend === 'want' ? works : !works) {
+        const cell = row[monday];
+        const works = isShift(cell);
+        if (afterWeekend === 'want' ? works : cell === Code.EMPTY) {
           score += W5c;
           if (sink !== undefined && W5c > 0) {
             const message = works ? 'po víkendu nemá volno' : 'po víkendu volno, i když ho nechce';
