@@ -195,14 +195,13 @@ describe('the shell', () => {
 
   it('has a panel for each tab, labelled by it, all of them in the page', () => {
     renderApp(memoryStorage(newAppData()));
-    expect(screen.getAllByText('Připravuje se…')).toHaveLength(3);
     expect(screen.getAllByRole('tabpanel', { hidden: true })).toHaveLength(3);
     for (const name of ['Měsíc', 'Tým', 'Pravidla']) {
       const tab = screen.getByRole('tab', { name });
       const panel = panelOf(tab);
       expect(panel).toHaveAttribute('role', 'tabpanel');
       expect(panel).toHaveAttribute('aria-labelledby', tab.id);
-      expect(panel).toHaveTextContent('Připravuje se…');
+      expect(panel).not.toBeEmptyDOMElement(); // the screen of the tab, or a placeholder
     }
   });
 

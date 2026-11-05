@@ -1,3 +1,5 @@
+import type { AfterWeekend, NightsPref, Rating, WeekendStyle } from '../domain/types';
+
 // The Czech wording of the UI. Each screen that needs labels adds its own here.
 
 /** The months, January first: the name of month `YYYY-MM` is `MONTH_NAMES[MM - 1]`. */
@@ -58,3 +60,73 @@ export const FILE_ERRORS = {
   save: 'Soubor se nepodařilo uložit.',
   dismiss: 'Zavřít',
 };
+
+/** The Team screen: the labels on the card of a person. */
+export const TEAM_SCREEN = {
+  add: 'Přidat člověka',
+  name: 'Jméno',
+  moveUp: 'Posunout nahoru',
+  moveDown: 'Posunout dolů',
+  remove: 'Odebrat',
+  /** Asked before a person is removed. Their shifts and requests go with them. */
+  confirmRemove: (name: string): string =>
+    `Odebrat ${name} z týmu? Smažou se i všechny směny a žádosti této osoby.`,
+  activeFrom: 'V týmu od',
+  activeTo: 'V týmu do',
+  nights: 'Noční',
+  weekends: 'Víkendy',
+  afterWeekend: 'Po víkendu',
+  afterNights: 'Po posledním nočním (po 1 dni volna) může přijít',
+  notes: 'Poznámka',
+  /** The yearly days of each absence. */
+  allowance: { DOV: 'Dovolená / rok', MD: 'MyDay / rok' },
+  startingCounts: 'Výchozí počty',
+  /** The counts a person starts with, by what is counted. */
+  counts: {
+    twelve: '12h směny',
+    nights: 'Noční směny',
+    holidayTwelve: 'Svátky',
+    festive: 'Vánoce',
+  },
+};
+
+/** An option of a select, and the value that it stands for. */
+export interface Choice<T> {
+  value: T;
+  label: string;
+}
+
+// The options of the survey (spec 6.3), in its order. The wording is the survey's, so that the
+// team lead can copy the answers over; the value is what the generator reads.
+
+/** How much a shift is preferred, the most preferred first. No answer is `null`. */
+export const RATING_CHOICES: readonly Choice<Rating | null>[] = [
+  { value: null, label: '—' },
+  { value: 5, label: 'nejvíce preferuji' },
+  { value: 4, label: 'spíše preferuji' },
+  { value: 3, label: 'neutrální' },
+  { value: 2, label: 'spíše nepreferuji' },
+  { value: 1, label: 'nejméně preferuji' },
+];
+
+export const NIGHTS_CHOICES: readonly Choice<NightsPref>[] = [
+  { value: 'never', label: 'Noční směny nechci / preferuji jejich neplánování.' },
+  {
+    value: 'ifNeeded',
+    label: 'Noční směny spíše nechci, ale v případě potřeby je mohu sloužit.',
+  },
+  { value: 'normal', label: 'Noční směny mi nevadí a mohu je standardně sloužit.' },
+  { value: 'extra', label: 'Rád budu brát noční směny i za mé kolegy, pokud je to možné.' },
+];
+
+export const WEEKEND_CHOICES: readonly Choice<WeekendStyle>[] = [
+  { value: 'whole', label: 'Jeden celý víkend (so + ne) v měsíci' },
+  { value: 'single', label: 'Jednotlivé dny ve více víkendech' },
+  { value: 'any', label: 'Je mi to jedno' },
+];
+
+export const AFTER_WEEKEND_CHOICES: readonly Choice<AfterWeekend>[] = [
+  { value: 'want', label: 'Chci po víkendu volné dny' },
+  { value: 'noAutomatic', label: 'Nerozdávat automaticky volné dny po víkendu' },
+  { value: 'any', label: 'Je mi to jedno' },
+];

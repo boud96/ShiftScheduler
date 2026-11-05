@@ -58,6 +58,26 @@ h1 {
   border-color: var(--accent);
 }
 
+.button:disabled {
+  color: var(--muted);
+  cursor: default;
+  opacity: 0.5;
+}
+
+.button:disabled:hover {
+  border-color: var(--line);
+}
+
+.button-danger {
+  color: var(--danger-text);
+  border-color: var(--danger-line);
+}
+
+.button-danger:hover {
+  background: var(--danger-bg);
+  border-color: var(--danger-text);
+}
+
 .button-primary {
   color: #fff;
   background: var(--accent);
@@ -228,4 +248,104 @@ h1 {
   display: flex;
   gap: 8px;
   justify-content: flex-end;
+}
+
+/* Team screen */
+
+.team-screen {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.team-toolbar {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.team-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 480px), 1fr));
+  gap: 16px;
+  align-items: start;
+}
+
+.person-card {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+
+.person-card-head {
+  display: flex;
+  gap: 6px;
+}
+
+.person-card input:not([type='checkbox']),
+.person-card select,
+.person-card textarea {
+  width: 100%;
+  min-width: 0;
+  padding: 5px 8px;
+  font: inherit;
+  color: var(--text);
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+}
+
+.person-card textarea {
+  resize: vertical;
+}
+
+.person-card .person-name {
+  flex: 1;
+  font-weight: 600;
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.field-label,
+.group legend {
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+
+.field-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 8px 10px;
+}
+
+.group {
+  min-width: 0;
+  padding: 0;
+  margin: 0;
+  border: 0;
+}
+
+.group legend {
+  padding: 0;
+  margin-bottom: 4px;
+}
+
+.check-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 18px;
+}
+
+.check {
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
 }

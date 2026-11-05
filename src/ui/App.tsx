@@ -3,6 +3,7 @@ import type { ComponentType } from 'react';
 import { SaveBar } from './SaveBar';
 import { StartScreen } from './StartScreen';
 import { useApp } from './store';
+import { TeamScreen } from './team/TeamScreen';
 import { APP_TITLE, FILE_ERRORS, TABS_LABEL, TAB_LABELS, TAB_PANEL_SOON } from './text';
 
 type TabId = keyof typeof TAB_LABELS;
@@ -17,7 +18,7 @@ function ComingSoon() {
 /** The screen of each tab. A tab shows a placeholder until its screen is built. */
 const SCREENS: Screens = {
   month: ComingSoon,
-  team: ComingSoon,
+  team: TeamScreen,
   rules: ComingSoon,
 };
 
