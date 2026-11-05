@@ -29,6 +29,8 @@ export type Action =
       month: MonthKey;
       /** The month a run found, a row per person of `personIds`. */
       rows: Uint8Array[];
+      /** The cells the run could not change, aligned with `rows`: `buildMonthGrid(...).fixed`. */
+      fixed: Uint8Array[];
       seed: number;
       /** The people of the rows: `buildMonthGrid(...).personIds` when the run started. */
       personIds: PersonId[];
@@ -77,16 +79,30 @@ function togglePin(data: AppData, date: ISODate, personId: PersonId): AppData {
 }
 
 /**
- * Stores a month found by a run that started some time ago. The rows are matched to people by id
- * against the grid as it is now, so a person added, removed or moved since is handled. Only the
- * cells that are free in that grid are written: an edit made while the run went on is kept.
+ * Stores a month found by a run that started some time ago. The rows and the fixed cells of the run
+ * are matched to people by id against the grid as it is now, so a person added, removed or moved
+ * since is handled. A cell is written only if it was free when the run started and is free now:
+ * an edit made during the run is kept, and so is a cell that the run could not change, such as an
+ * x or an absence that the team lead has cleared since. The run's rows still hold such a cell as
+ * it was.
  */
 function applyGenerated(data: AppData, a: Extract<Action, { type: 'applyGenerated' }>): AppData {
   const grid = buildMonthGrid(data, a.month);
-  const found = new Map(a.personIds.map((id, i) => [id, a.rows[i]]));
-  // A person who was not in the run keeps their row, so nothing is written for them.
-  const rows = grid.personIds.map((id, p) => found.get(id) ?? grid.rows[p]);
-  const applied = applyRows(data, a.month, rows, grid.fixed);
+  const run = new Map(a.personIds.map((id, i) => [id, { row: a.rows[i], fixed: a.fixed[i] }]));
+  const rows: Uint8Array[] = [];
+  const fixed: Uint8Array[] = [];
+  grid.personIds.forEach((id, p) => {
+    const found = run.get(id);
+    if (found === undefined) {
+      // A person who was not in the run: nothing to write for them.
+      rows.push(grid.rows[p]);
+      fixed.push(new Uint8Array(grid.ctx.days.length).fill(1));
+    } else {
+      rows.push(found.row);
+      fixed.push(grid.fixed[p].map((now, i) => now | found.fixed[i]));
+    }
+  });
+  const applied = applyRows(data, a.month, rows, fixed);
   const meta: MonthMeta = {
     ...applied.months[a.month],
     status: 'draft',

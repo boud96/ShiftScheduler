@@ -3,7 +3,7 @@ import { Code } from '../domain/codes';
 import { buildMonthGrid } from '../domain/context';
 import type { MonthGrid } from '../domain/context';
 import { newAppData, newPerson } from '../domain/defaults';
-import type { AppData, ISODate, PersonId, StoredCell } from '../domain/types';
+import type { AppData, ISODate, Person, PersonId, StoredCell } from '../domain/types';
 import { reduce } from './reducer';
 import type { Action } from './reducer';
 
@@ -163,12 +163,27 @@ describe('applyGenerated', () => {
       type: 'applyGenerated',
       month: MONTH,
       rows,
+      fixed: grid.fixed,
       seed: 42,
       personIds: grid.personIds,
       generatedAt: GENERATED_AT,
     };
     return reduce(data, action);
   }
+
+  /** The plan after these actions, in order. */
+  const edit = (data: AppData, ...actions: Action[]): AppData =>
+    actions.reduce((current, action) => reduce(current, action), data);
+
+  /** The action that clears a cell. */
+  const clear = (date: ISODate, personId: PersonId): Action => ({
+    type: 'setCell',
+    date,
+    personId,
+    cell: null,
+  });
+
+  const person = (data: AppData, id: PersonId) => data.people.find((p) => p.id === id) as Person;
 
   // A request, an absence, a pin, and the last day of December (which is no part of the month).
   const start = plan(
@@ -262,6 +277,95 @@ describe('applyGenerated', () => {
     expect(cellOf(next, '2027-01-14', 'p6')).toStrictEqual({ code: 'MD' });
   });
 
+  it('does not bring back an x, an absence or a pin that was cleared during the run', () => {
+    const grid = buildMonthGrid(start, MONTH);
+    const rows = generated(grid, ['p5', '2027-01-09', Code.R12]);
+    // The rows of the run still hold what was fixed when it began.
+    const held = (id: PersonId, date: ISODate) =>
+      rows[grid.personIds.indexOf(id)][column(grid, date)];
+    expect([held('p1', '2027-01-01'), held('p2', '2027-01-04'), held('p3', '2027-01-05')]).toEqual([
+      Code.X,
+      Code.DOV,
+      Code.R2,
+    ]);
+
+    // Meanwhile the team lead clears all three.
+    const edited = edit(
+      start,
+      clear('2027-01-01', 'p1'),
+      clear('2027-01-04', 'p2'),
+      clear('2027-01-05', 'p3'),
+    );
+    const next = apply(edited, grid, rows);
+    expect(cellOf(next, '2027-01-01', 'p1')).toBeUndefined();
+    expect(cellOf(next, '2027-01-04', 'p2')).toBeUndefined();
+    expect(cellOf(next, '2027-01-05', 'p3')).toBeUndefined();
+    expect(cellOf(next, '2027-01-09', 'p5')).toStrictEqual({ code: 'R12' }); // the run still lands
+  });
+
+  it('does not overwrite a cell that was fixed at the start and replaced during the run', () => {
+    const grid = buildMonthGrid(start, MONTH);
+    const rows = generated(grid);
+    const edited = reduce(start, {
+      type: 'setCell',
+      date: '2027-01-01',
+      personId: 'p1',
+      cell: { code: 'R2' }, // an unpinned shift, so a free cell now, where the run holds the x
+    });
+    const next = apply(edited, grid, rows);
+    expect(cellOf(next, '2027-01-01', 'p1')).toStrictEqual({ code: 'R2' });
+  });
+
+  it('does not write a day that was outside the team dates when the run started', () => {
+    // p4 joins on the 11th, so the days before are fixed for the run. A leftover R1 stands on the
+    // 5th, and the row of the run holds it.
+    const begin = edit(
+      start,
+      { type: 'updatePerson', person: { ...person(start, 'p4'), activeFrom: '2027-01-11' } },
+      { type: 'setCell', date: '2027-01-05', personId: 'p4', cell: { code: 'R1' } },
+    );
+    const grid = buildMonthGrid(begin, MONTH);
+    const rows = generated(grid, ['p4', '2027-01-12', Code.R2]);
+    expect(rows[grid.personIds.indexOf('p4')][column(grid, '2027-01-05')]).toBe(Code.R1);
+
+    // Meanwhile p4 joins from the start of the month and the leftover is cleared.
+    const edited = edit(
+      begin,
+      { type: 'updatePerson', person: { ...person(begin, 'p4'), activeFrom: null } },
+      clear('2027-01-05', 'p4'),
+    );
+    const next = apply(edited, grid, rows);
+    expect(cellOf(next, '2027-01-05', 'p4')).toBeUndefined();
+    expect(cellOf(next, '2027-01-12', 'p4')).toStrictEqual({ code: 'R2' });
+  });
+
+  it('does not write a day that has left the team dates since the run started', () => {
+    const grid = buildMonthGrid(start, MONTH);
+    const rows = generated(grid, ['p4', '2027-01-14', Code.R1], ['p4', '2027-01-20', Code.R1]);
+    const edited = reduce(start, {
+      type: 'updatePerson',
+      person: { ...person(start, 'p4'), activeTo: '2027-01-15' },
+    });
+    const next = apply(edited, grid, rows);
+    expect(cellOf(next, '2027-01-14', 'p4')).toStrictEqual({ code: 'R1' });
+    expect(cellOf(next, '2027-01-20', 'p4')).toBeUndefined();
+  });
+
+  it('matches the cells that were fixed at the start to people by id too', () => {
+    const grid = buildMonthGrid(start, MONTH);
+    // p1 holds the x on the 1st, fixed; p2, the next row, is free that day and gets R12.
+    const rows = generated(grid, ['p2', '2027-01-01', Code.R12]);
+    // Meanwhile p1 moves down a place, and its x is cleared.
+    const edited = edit(
+      start,
+      { type: 'movePerson', personId: 'p1', delta: 1 },
+      clear('2027-01-01', 'p1'),
+    );
+    const next = apply(edited, grid, rows);
+    expect(cellOf(next, '2027-01-01', 'p2')).toStrictEqual({ code: 'R12' });
+    expect(cellOf(next, '2027-01-01', 'p1')).toBeUndefined();
+  });
+
   it('gives each row to its person by id, however the team changed meanwhile', () => {
     const grid = buildMonthGrid(start, MONTH);
     const rows = generated(
@@ -284,6 +388,20 @@ describe('applyGenerated', () => {
     expect(cellOf(next, '2027-01-11', 'p7')).toStrictEqual({ code: 'O20' });
     expect(cellOf(next, '2027-01-12', 'p8')).toStrictEqual({ code: 'N' });
     expect(Object.values(next.cells).some((day) => 'p9' in day)).toBe(false);
+  });
+
+  it('leaves a person who was not in the run exactly as they are', () => {
+    const grid = buildMonthGrid(start, MONTH);
+    const rows = generated(grid, ['p3', '2027-01-07', Code.R2]);
+    // Meanwhile a person joins, and a cell is filled in for them, its pin switched off.
+    const edited = edit(
+      start,
+      { type: 'addPerson', id: 'p9' },
+      { type: 'setCell', date: '2027-01-12', personId: 'p9', cell: { code: 'O', pinned: false } },
+    );
+    const next = apply(edited, grid, rows);
+    expect(cellOf(next, '2027-01-12', 'p9')).toStrictEqual({ code: 'O', pinned: false });
+    expect(cellOf(next, '2027-01-07', 'p3')).toStrictEqual({ code: 'R2' }); // the run lands
   });
 
   it('skips a person who is no longer in the team that month', () => {
