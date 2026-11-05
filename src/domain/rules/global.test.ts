@@ -1,4 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
+import { mulberry32 } from '../../generator/rng';
 import { ctxFor, noWishes, rowsOf, rules, run, units } from '../../test/rulekit';
 import type { PersonPatch } from '../../test/rulekit';
 import type { MonthContext } from '../context';
@@ -51,16 +52,6 @@ describe('global wishes', () => {
 // day 0 is Fri 1 Jan, day 3 is Mon 4 Jan, and the weekdays are days 3-7, 10-14, 17-21 and 24-28.
 // A strip starts at day 0. Wish levels are the default ones (3), so W7 weighs 20, W8 10 and W9 5.
 
-/** A seeded random number generator, so that the random rows below are the same on every run. */
-function mulberry32(seed: number): () => number {
-  let a = seed;
-  return () => {
-    a = (a + 0x6d2b79f5) | 0;
-    let t = Math.imul(a ^ (a >>> 15), 1 | a);
-    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
-    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-  };
-}
 /** A strip with the given codes on the given days (counted from 0) and nothing on the others. */
 const at = (codes: Record<number, string>): string => {
   const days = Object.keys(codes).map(Number);
