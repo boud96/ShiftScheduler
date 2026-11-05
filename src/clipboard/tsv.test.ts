@@ -146,6 +146,7 @@ describe('planPaste', () => {
       expect(planJan(d, ids[0], jan(1), 'Operátor 1\nOperátor 2')).toEqual({
         writes: [],
         ignored: [],
+        namesColumn: true,
       });
     });
     it('is a day column when it holds a code', () => {
@@ -193,6 +194,25 @@ describe('planPaste', () => {
       expect(plan.writes).toEqual([{ personId: ids[7], date: jan(1), code: 'x' }]);
       expect(plan.ignored).toEqual([{ row: 1, col: 1, value: 'DOV' }]);
     });
+    it('is reported in namesColumn: true only when it was left out as names', () => {
+      const { d, ids } = team();
+      const flag = (text: string): boolean => planJan(d, ids[0], jan(1), text).namesColumn;
+      expect(flag('Operátor 1\tx\nOperátor 2\tDOV')).toBe(true);
+      expect(flag('Operátor 1')).toBe(true); // names alone: nothing is written, but they were names
+      expect(flag('x\tDOV')).toBe(false); // the first column is a day
+      expect(flag('Operátor 1\tx\nx\tDOV')).toBe(false); // one value of it is a code
+      expect(flag('\tx\n \tDOV')).toBe(false); // empty in every row: a day column (R30)
+      expect(flag('')).toBe(false);
+    });
+    it('is reported in namesColumn whatever happens to the values after it', () => {
+      const { d, ids } = team();
+      // The start person is not in the data, so nothing is written; the names were still names.
+      const plan = planJan(d, 'nobody', jan(1), 'Operátor 1\tx');
+      expect(plan.writes).toEqual([]);
+      expect(plan.ignored).toEqual([{ row: 0, col: 1, value: 'x' }]);
+      expect(plan.namesColumn).toBe(true);
+      expect(planJan(d, ids[0], jan(1), 'Operátor 1\tŠk.').namesColumn).toBe(true);
+    });
   });
 
   it('reads codes in any case, with spaces around them', () => {
@@ -226,7 +246,11 @@ describe('planPaste', () => {
   });
   it('gives an empty plan for no text', () => {
     const { d, ids } = team();
-    expect(planJan(d, ids[0], jan(1), '')).toEqual({ writes: [], ignored: [] });
+    expect(planJan(d, ids[0], jan(1), '')).toEqual({
+      writes: [],
+      ignored: [],
+      namesColumn: false,
+    });
   });
   it('does not change the data it plans for', () => {
     const { d, ids } = team();
@@ -294,7 +318,7 @@ describe('planPaste', () => {
         { row: 3, col: 0, value: 'MD' },
       ]);
     });
-    it('write nothing when the start person is not in the team', () => {
+    it('write nothing when the start person is not in the data', () => {
       const { d } = team();
       const plan = planJan(d, 'nobody', jan(1), 'x\tDOV\n\tMD');
       expect(plan.writes).toEqual([]);
@@ -304,6 +328,65 @@ describe('planPaste', () => {
         { row: 1, col: 1, value: 'MD' },
       ]);
     });
+
+    // The rows are the people of the month grid: those in the team on a day of the month.
+    it('skip a person who is not in the team all month', () => {
+      const { d, ids } = team();
+      d.people[1].activeTo = '2026-12-31'; // B left before the month
+      const plan = planJan(d, ids[0], jan(1), 'x\nDOV');
+      expect(plan.writes).toEqual([
+        { personId: ids[0], date: jan(1), code: 'x' },
+        { personId: ids[2], date: jan(1), code: 'DOV' },
+      ]);
+      expect(plan.ignored).toEqual([]);
+    });
+    it('skip a person who only joins after the month', () => {
+      const { d, ids } = team();
+      d.people[1].activeFrom = '2027-02-01';
+      expect(planJan(d, ids[0], jan(1), 'x\nDOV').writes.map((w) => w.personId)).toEqual([
+        ids[0],
+        ids[2],
+      ]);
+    });
+    it('keep a person who is in the team on a single day of the month', () => {
+      const { d, ids } = team();
+      d.people[1].activeFrom = jan(31);
+      d.people[2].activeTo = jan(1);
+      const plan = planJan(d, ids[0], jan(1), 'x\nDOV\nMD');
+      expect(plan.writes.map((w) => w.personId)).toEqual([ids[0], ids[1], ids[2]]);
+    });
+    it('count the beyond-the-last-person rows from the last person in the team', () => {
+      const { d, ids } = team();
+      d.people[7].activeTo = '2026-12-31'; // the last person has left
+      const plan = planJan(d, ids[6], jan(1), 'x\nDOV');
+      expect(plan.writes).toEqual([{ personId: ids[6], date: jan(1), code: 'x' }]);
+      expect(plan.ignored).toEqual([{ row: 1, col: 0, value: 'DOV' }]);
+    });
+    it('write nothing when the start person is not in the team that month', () => {
+      const { d, ids } = team();
+      d.people[1].activeTo = '2026-12-31';
+      const plan = planJan(d, ids[1], jan(1), 'x\tDOV\n\tMD');
+      expect(plan.writes).toEqual([]);
+      expect(plan.ignored).toEqual([
+        { row: 0, col: 0, value: 'x' },
+        { row: 0, col: 1, value: 'DOV' },
+        { row: 1, col: 1, value: 'MD' },
+      ]);
+    });
+    it('follow the team of the month asked for', () => {
+      const { d, ids } = team();
+      d.people[1].activeTo = '2027-01-31'; // in the team in January, gone in February
+      const rows = (month: string, date: string): string[] =>
+        planPaste(d, month, { personId: ids[0], date }, 'x\nDOV').writes.map((w) => w.personId);
+      expect(rows('2027-01', jan(1))).toEqual([ids[0], ids[1]]);
+      expect(rows('2027-02', '2027-02-01')).toEqual([ids[0], ids[2]]);
+    });
+    it('take the team of the month, also when the paste starts in the month before', () => {
+      const { d, ids } = team();
+      d.people[2].activeFrom = jan(4); // C joins in January
+      const plan = planJan(d, ids[0], '2026-12-28', 'x\nDOV\nMD');
+      expect(plan.writes.map((w) => w.personId)).toEqual([ids[0], ids[1], ids[2]]);
+    });
   });
 });
 
@@ -311,6 +394,7 @@ describe('applyPaste', () => {
   const write = (personId: PersonId, date: string, code: CodeName): PastePlan => ({
     writes: [{ personId, date, code }],
     ignored: [],
+    namesColumn: false,
   });
 
   it.each(['R1', 'R2', 'O20', 'O', 'N', 'R12', 'N12'] as const)('pins the shift %s', (code) => {

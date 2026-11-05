@@ -1,5 +1,6 @@
 import { addDays, monthDays, tailDays } from '../domain/calendar';
 import { codeFromName, isShift, nameOf } from '../domain/codes';
+import { buildMonthGrid } from '../domain/context';
 import type {
   AppData,
   CodeName,
@@ -38,6 +39,11 @@ export interface PastePlan {
    * pasted (a names column included), and `value` is the cell as pasted.
    */
   ignored: Array<{ row: number; col: number; value: string }>;
+  /**
+   * True when the first column was left out as a names column, so that the dialog can say so. It
+   * follows from the text alone, not from where the values land.
+   */
+  namesColumn: boolean;
 }
 
 /** What a pasted cell holds: a code name, `''` if it is empty, or `null` if it is not a code. */
@@ -57,13 +63,15 @@ function hasNamesColumn(rows: string[][]): boolean {
 
 /**
  * Plans what pasting `text` (cells copied from Excel) does to `month`. The first row goes to
- * `start.personId` and the next rows to the next people of `data.people`; the first column goes to
- * `start.date` and the next columns to the next dates. Only the last 7 days of the previous month
- * and the days of `month` take a value.
+ * `start.personId` and the next rows to the next people of the month grid (`buildMonthGrid`: the
+ * people in the team on at least one day of the month, in the order of `data.people`); the first
+ * column goes to `start.date` and the next columns to the next dates. Only the last 7 days of the
+ * previous month and the days of `month` take a value.
  *
- * Empty cells write nothing. A value that is not a code, and a value that has no person or no valid
- * date, is listed in `ignored`. A first column holding only values that are not codes (and at least
- * one) is taken for names and left out, unlisted. `data` is not changed.
+ * Empty cells write nothing. A value that is not a code, and a value that has no person (a row
+ * beyond the last person, or a start person who is not in the month grid) or no valid date, is
+ * listed in `ignored`. A first column holding only values that are not codes (and at least one) is
+ * taken for names and left out, unlisted; `namesColumn` says so. `data` is not changed.
  */
 export function planPaste(
   data: AppData,
@@ -72,22 +80,24 @@ export function planPaste(
   text: string,
 ): PastePlan {
   const rows = parseTsv(text);
-  const skip = hasNamesColumn(rows) ? 1 : 0;
+  const namesColumn = hasNamesColumn(rows);
+  const skip = namesColumn ? 1 : 0;
   const valid = new Set(
     [...tailDays(month, data.settings), ...monthDays(month, data.settings)].map((day) => day.date),
   );
-  const first = data.people.findIndex((person) => person.id === start.personId);
-  const plan: PastePlan = { writes: [], ignored: [] };
+  const { personIds } = buildMonthGrid(data, month);
+  const first = personIds.indexOf(start.personId);
+  const plan: PastePlan = { writes: [], ignored: [], namesColumn };
 
   rows.forEach((cells, row) => {
-    const person = first < 0 ? undefined : data.people[first + row];
+    const personId = first < 0 ? undefined : personIds[first + row];
     cells.forEach((value, col) => {
       if (col < skip) return; // the names
       const code = readCell(value);
       if (code === '') return; // empty: nothing to write, nothing to report
       const date = addDays(start.date, col - skip);
-      if (person !== undefined && code !== null && valid.has(date)) {
-        plan.writes.push({ personId: person.id, date, code });
+      if (personId !== undefined && code !== null && valid.has(date)) {
+        plan.writes.push({ personId, date, code });
       } else {
         plan.ignored.push({ row, col, value });
       }
@@ -102,8 +112,14 @@ function storedCell(code: CodeName): StoredCell {
   return c !== null && isShift(c) ? { code, pinned: true } : { code };
 }
 
-/** Stores the cells of a plan in a copy of `data`, over whatever they held. */
-export function applyPaste(data: AppData, plan: PastePlan): AppData {
+/**
+ * Stores the cells of a plan in a copy of `data`, over whatever they held. Only `writes` is read,
+ * so a plan built by hand needs no `ignored` or `namesColumn`.
+ */
+export function applyPaste(
+  data: AppData,
+  plan: Pick<PastePlan, 'writes'> & Partial<PastePlan>,
+): AppData {
   const cells = { ...data.cells };
   for (const { personId, date, code } of plan.writes) {
     cells[date] = { ...cells[date], [personId]: storedCell(code) };
