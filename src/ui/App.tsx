@@ -6,6 +6,7 @@ import { useApp } from './store';
 import { APP_TITLE, FILE_ERRORS, TABS_LABEL, TAB_LABELS, TAB_PANEL_SOON } from './text';
 
 type TabId = keyof typeof TAB_LABELS;
+type Screens = Record<TabId, ComponentType>;
 
 const TAB_IDS: readonly TabId[] = ['month', 'team', 'rules'];
 
@@ -14,16 +15,19 @@ function ComingSoon() {
 }
 
 /** The screen of each tab. A tab shows a placeholder until its screen is built. */
-const SCREENS: Record<TabId, ComponentType> = {
+const SCREENS: Screens = {
   month: ComingSoon,
   team: ComingSoon,
   rules: ComingSoon,
 };
 
-/** The three tabs under the title and the save bar. Only the selected tab's screen is shown. */
-function Shell() {
+/**
+ * The three tabs under the title and the save bar. Every tab's panel stays mounted, and the ones
+ * that are not selected are hidden. So a screen keeps its own state while another tab is open: the
+ * month it shows, a run of the generator that is still going.
+ */
+function Shell({ screens }: { screens: Screens }) {
   const [tab, setTab] = useState<TabId>('month');
-  const Screen = SCREENS[tab];
   return (
     <>
       <header className="app-header">
@@ -39,15 +43,29 @@ function Shell() {
             id={`tab-${id}`}
             className="tab"
             aria-selected={id === tab}
-            aria-controls="tab-panel"
+            aria-controls={`tab-panel-${id}`}
             onClick={() => setTab(id)}
           >
             {TAB_LABELS[id]}
           </button>
         ))}
       </div>
-      <main id="tab-panel" className="tab-panel" role="tabpanel" aria-labelledby={`tab-${tab}`}>
-        <Screen />
+      <main>
+        {TAB_IDS.map((id) => {
+          const Screen = screens[id];
+          return (
+            <div
+              key={id}
+              id={`tab-panel-${id}`}
+              className="tab-panel"
+              role="tabpanel"
+              aria-labelledby={`tab-${id}`}
+              hidden={id !== tab}
+            >
+              <Screen />
+            </div>
+          );
+        })}
       </main>
     </>
   );
@@ -65,13 +83,16 @@ function ErrorBanner({ message, onDismiss }: { message: string; onDismiss: () =>
   );
 }
 
-/** The start screen while there is no data, the three tabs once there is. */
-export function App() {
+/**
+ * The start screen while there is no data, the three tabs once there is. `screens` replaces the
+ * screen of a tab. The page leaves it out; a test uses it to put in a screen with state of its own.
+ */
+export function App({ screens }: { screens?: Partial<Screens> }) {
   const { data, error, dismissError } = useApp();
   return (
     <div className="app">
       {error !== null && <ErrorBanner message={error} onDismiss={dismissError} />}
-      {data === null ? <StartScreen /> : <Shell />}
+      {data === null ? <StartScreen /> : <Shell screens={{ ...SCREENS, ...screens }} />}
     </div>
   );
 }

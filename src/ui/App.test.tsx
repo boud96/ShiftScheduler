@@ -1,6 +1,8 @@
 // @vitest-environment jsdom
-import { render, screen } from '@testing-library/react';
+import { render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { useState } from 'react';
+import type { ComponentProps } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { AppProvider, useApp } from './store';
 import { App } from './App';
@@ -31,10 +33,30 @@ function EditButton() {
   );
 }
 
-function renderApp(storage: StorageAdapter) {
+/** A screen with state of its own, as the real ones have: it counts clicks on its button. */
+function Counter() {
+  const [clicks, setClicks] = useState(0);
+  return (
+    <>
+      <button type="button" onClick={() => setClicks(clicks + 1)}>
+        Klik
+      </button>
+      <p>{`Kliknuto: ${clicks}`}</p>
+    </>
+  );
+}
+
+/**
+ * The panel that a tab controls. A hidden panel has no accessible name, so it cannot be found by
+ * name; it is found by the id that its tab names.
+ */
+const panelOf = (tab: HTMLElement): HTMLElement =>
+  document.getElementById(tab.getAttribute('aria-controls') ?? '') as HTMLElement;
+
+function renderApp(storage: StorageAdapter, screens?: ComponentProps<typeof App>['screens']) {
   return render(
     <AppProvider storage={storage} runner={inProcessRunner}>
-      <App />
+      <App screens={screens} />
       <EditButton />
     </AppProvider>,
   );
@@ -165,7 +187,20 @@ describe('the shell', () => {
     ]);
   });
 
-  it('shows one tab panel at a time, each still being prepared', async () => {
+  it('has a panel for each tab, labelled by it, all of them in the page', () => {
+    renderApp(memoryStorage(newAppData()));
+    expect(screen.getAllByText('Připravuje se…')).toHaveLength(3);
+    expect(screen.getAllByRole('tabpanel', { hidden: true })).toHaveLength(3);
+    for (const name of ['Měsíc', 'Tým', 'Pravidla']) {
+      const tab = screen.getByRole('tab', { name });
+      const panel = panelOf(tab);
+      expect(panel).toHaveAttribute('role', 'tabpanel');
+      expect(panel).toHaveAttribute('aria-labelledby', tab.id);
+      expect(panel).toHaveTextContent('Připravuje se…');
+    }
+  });
+
+  it('shows only the panel of the selected tab, and hides the other two', async () => {
     renderApp(memoryStorage(newAppData()));
     expect(screen.getByRole('tab', { name: 'Měsíc' })).toHaveAttribute('aria-selected', 'true');
 
@@ -173,9 +208,45 @@ describe('the shell', () => {
       await userEvent.click(screen.getByRole('tab', { name }));
       expect(screen.getByRole('tab', { name })).toHaveAttribute('aria-selected', 'true');
       expect(screen.getAllByRole('tab', { selected: true })).toHaveLength(1);
-      const panel = screen.getByRole('tabpanel', { name });
-      expect(panel).toHaveTextContent('Připravuje se…');
+
+      // A role query reaches the visible panel alone, and that is the one of the selected tab.
+      const visible = screen.getAllByRole('tabpanel');
+      expect(visible).toHaveLength(1);
+      expect(visible[0]).toBe(screen.getByRole('tabpanel', { name }));
+      expect(visible[0]).toBeVisible();
+      const panels = screen.getAllByRole('tabpanel', { hidden: true });
+      expect(panels.filter((panel) => panel.hidden)).toHaveLength(2);
     }
+  });
+
+  it('keeps the state of a screen while another tab is open', async () => {
+    renderApp(memoryStorage(newAppData()), { month: Counter });
+    const month = () => panelOf(screen.getByRole('tab', { name: 'Měsíc' }));
+    await userEvent.click(within(month()).getByRole('button', { name: 'Klik' }));
+    await userEvent.click(within(month()).getByRole('button', { name: 'Klik' }));
+    expect(within(month()).getByText('Kliknuto: 2')).toBeVisible();
+
+    await userEvent.click(screen.getByRole('tab', { name: 'Tým' }));
+    expect(within(month()).getByText('Kliknuto: 2')).not.toBeVisible(); // still there, unseen
+
+    await userEvent.click(screen.getByRole('tab', { name: 'Měsíc' }));
+    expect(within(month()).getByText('Kliknuto: 2')).toBeVisible();
+  });
+
+  it('gives each panel a state of its own, and a role query one panel at a time', async () => {
+    renderApp(memoryStorage(newAppData()), { month: Counter, team: Counter, rules: Counter });
+    expect(screen.getAllByRole('button', { name: 'Klik', hidden: true })).toHaveLength(3);
+
+    await userEvent.click(screen.getByRole('button', { name: 'Klik' })); // the month's
+    await userEvent.click(screen.getByRole('tab', { name: 'Pravidla' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Klik' })); // the rules'
+    await userEvent.click(screen.getByRole('button', { name: 'Klik' }));
+
+    const count = (name: string) =>
+      within(panelOf(screen.getByRole('tab', { name }))).getByText(/^Kliknuto/);
+    expect(count('Měsíc')).toHaveTextContent('Kliknuto: 1');
+    expect(count('Tým')).toHaveTextContent('Kliknuto: 0');
+    expect(count('Pravidla')).toHaveTextContent('Kliknuto: 2');
   });
 });
 

@@ -146,6 +146,11 @@ h1 {
   border-radius: 0 0 8px 8px;
 }
 
+/* A rule that sets `display` on a panel must not bring back a panel that is hidden. */
+.tab-panel[hidden] {
+  display: none;
+}
+
 .coming-soon {
   margin: 0;
   color: var(--muted);
