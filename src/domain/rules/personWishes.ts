@@ -59,7 +59,7 @@ function cellsWith(row: Uint8Array, from: number, to: number, code: number): num
 /** The night shifts of the month. */
 function monthNights(ctx: MonthContext, row: Uint8Array): number[] {
   const found: number[] = [];
-  for (let i = ctx.first; i < row.length; i++) if (isNight(row[i])) found.push(i);
+  for (let i = ctx.first; i < ctx.days.length; i++) if (isNight(row[i])) found.push(i);
   return found;
 }
 
@@ -76,8 +76,8 @@ function overtime(ctx: MonthContext, p: number, stats: PersonStats, sink?: Sink)
 
 /**
  * W2: the penalty of a block of `length` days of `code`, from day `begin` to day `end`, if it is
- * too short. A block that ended before the month is last month's, and one that ends on the last day
- * may go on in the next month.
+ * too short. A block that ended before the month is last month's. An `open` block, the last of a
+ * stretch that reaches the last day of the month, may go on in the next month.
  */
 function shortBlock(
   ctx: MonthContext,
@@ -87,9 +87,10 @@ function shortBlock(
   length: number,
   begin: number,
   end: number,
+  open: boolean,
   sink?: Sink,
 ): number {
-  if (length >= MIN_BLOCK || end < ctx.first || end === row.length - 1) return 0;
+  if (length >= MIN_BLOCK || end < ctx.first || open) return 0;
   const penalty = (MIN_BLOCK - length) * ctx.weights.W2;
   if (sink !== undefined && penalty > 0) {
     const message = `krátký blok ${CODE_NAMES[code]} (jen ${fmtDays(length)})`;
@@ -101,6 +102,8 @@ function shortBlock(
 /**
  * W2 for the stretch of work from day `s` to day `e`: its R1, R2, O20 and O, in order, form blocks
  * of one shift each. N, R12 and N12 are no part of a block: they neither change it nor break it.
+ * If the stretch reaches the last day of the month, its last block may go on in the next month,
+ * whatever the stretch ends with.
  */
 function stretchBlocks(
   ctx: MonthContext,
@@ -110,6 +113,7 @@ function stretchBlocks(
   e: number,
   sink?: Sink,
 ): number {
+  const open = e === ctx.days.length - 1; // the last block may go on in the next month
   let score = 0;
   let code = 0; // the shift of the block so far, 0 before the first block
   let length = 0;
@@ -135,14 +139,14 @@ function stretchBlocks(
           report(sink, 'W2', p, [end, j], message, penalty);
         }
       }
-      score += shortBlock(ctx, p, row, code, length, begin, end, sink);
+      score += shortBlock(ctx, p, row, code, length, begin, end, false, sink);
     }
     code = c;
     length = 1;
     begin = j;
     end = j;
   }
-  if (code !== 0) score += shortBlock(ctx, p, row, code, length, begin, end, sink);
+  if (code !== 0) score += shortBlock(ctx, p, row, code, length, begin, end, open, sink);
   return score;
 }
 
@@ -153,7 +157,7 @@ function stretchBlocks(
 function rhythm(ctx: MonthContext, p: number, row: Uint8Array, sink?: Sink): number {
   const { first } = ctx;
   const W3 = ctx.weights.W3;
-  const last = row.length - 1;
+  const last = ctx.days.length - 1;
   let score = 0;
   let prevStart = 0; // the stretch before the one in hand
   let prevEnd = -3; // none yet: a stretch starts at day 0 or later, so `s - 2` never equals this
@@ -246,7 +250,7 @@ function nightRuns(
   const { first } = ctx;
   const { W4a, W4b, W4c } = ctx.weights;
   const afterNights = ctx.people[p].prefs.afterNights;
-  const last = row.length - 1;
+  const last = ctx.days.length - 1;
   let score = 0;
   let runs = 0; // the runs that reach into the month
 
@@ -363,7 +367,7 @@ function willingness(
  * Rules that look at several days read the 7 days before the month, so that a stretch or a run that
  * began there counts its days there. A finding is scored and reported only if its last day is a day
  * of the month: what lies wholly in the previous month was judged with that month. "The last day of
- * the month" is the last index of `row`.
+ * the month" is the last index of `ctx.days`; a row is as long.
  *
  * Without a `sink` no array, string or closure is created: every one in this file sits inside an
  * `if (sink !== undefined ...)`. A wish whose penalty is 0 (switched off) is not reported. Every

@@ -176,10 +176,24 @@ describe('W2 in detail', () => {
       expect(u(`R1 R1 ${off} R1 R1`, 'W2')).toBe(2 + 2);
     }
   });
-  it('exempts a block only if it ends on the last day of the month', () => {
+  it('exempts the last block of a stretch that reaches the last day of the month', () => {
     expect(u(pad(26, 'R1', 'R1'), 'W2')).toBe(0); // days 26-27, the last two
     expect(u(pad(25, 'R1', 'R1'), 'W2')).toBe(2); // days 25-26, and 27 is empty
-    expect(u(pad(24, 'R1', 'R1', 'R12', 'R12'), 'W2')).toBe(2); // the R12 are not part of it
+    // The R12 are no part of the block, but the stretch reaches the last day, a Sunday: the block
+    // goes on on Monday, in the next month.
+    expect(u(pad(24, 'R1', 'R1', 'R12', 'R12'), 'W2')).toBe(0);
+    expect(u(pad(25, 'R2', 'R2', 'N'), 'W2')).toBe(0); // a night, too, leaves the block open
+    // Only the last block may go on: the R1 before the R2 may not.
+    expect(listed(found('W2', pad(23, 'R1', 'R2', 'R2', 'R12', 'R12')))).toEqual([
+      { message: 'krátký blok R1 (jen 1 den)', days: [23], units: 3 },
+      { message: 'změna směny uprostřed bloku (R1 → R2)', days: [23, 24], units: 1 },
+    ]);
+  });
+  it('gives a block no exemption if its stretch ends before the last day of the month', () => {
+    // The same R1 R1 R12 R12, on days 17-20: the stretch ends on the Sunday of the third weekend,
+    // a week before the last day, so the block cannot go on.
+    expect(u(pad(17, 'R1', 'R1', 'R12', 'R12'), 'W2')).toBe(2);
+    expect(u(pad(24, 'R1', 'R1', 'R12'), 'W2')).toBe(2); // ends on Saturday, a day before the last
   });
   it('counts a block that began last month with its days there', () => {
     expect(found('W2', 'R1', ['- - - - R1 R1 R1'])).toEqual([]); // 4 days, with day 1
@@ -410,6 +424,12 @@ describe('W4d in detail', () => {
     ]);
     expect(units(run(x, rowsOf(x, [''], ['N N N N N N N'])), x, 'W4d')).toBe(0);
   });
+  it('lists a night on the last day of the month', () => {
+    const x = nights('ifNeeded');
+    expect(listed(found('W4d', pad(26, 'N12', 'N12'), [], x), x)).toEqual([
+      { message: '2× noční, i když je bere jen v nouzi', days: [26, 27], units: 8 },
+    ]);
+  });
   it('asks nothing for a night of someone who never takes them: M7 has it', () => {
     const x = nights('never');
     expect(u('N N N', 'W4d', x)).toBe(0);
@@ -630,9 +650,10 @@ describe('the findings of a month', () => {
     const ev = run(ctx, rowsOf(ctx, strips, tails));
     const sum = ev.findings.reduce((total, f) => total + f.penalty, 0);
     expect(ev.score).toBeGreaterThan(0);
-    // Every penalty of today's rules is a multiple of 0.25, so the sums agree exactly; a later
-    // wish may bring rounding errors (the score is about 4e10), hence the tolerance. A penalty that
-    // lacks a finding would be 1.25 or more.
-    expect(Math.abs(sum - ev.score)).toBeLessThan(1e-3);
+    // The two sums add the same penalties in another order. W6 spreads shifts over 5 codes, so its
+    // penalties are fractions and the sums may differ by rounding errors, which grow with the
+    // score (about 4e10 here): hence a relative tolerance. A penalty that lacks a finding would be
+    // 1 or more, far above it.
+    expect(Math.abs(sum - ev.score)).toBeLessThanOrEqual(1e-12 * Math.max(1, Math.abs(ev.score)));
   });
 });
