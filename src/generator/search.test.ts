@@ -215,10 +215,67 @@ describe('generator limits', () => {
     expect(r.mustUnits).toBe(20 * 5 + 11 * 2);
   });
 
-  it('stops when the time budget has run out', async () => {
+  it('reports the temperature, which falls from 60 to 0.3 in each segment', async () => {
     const g = jan();
-    const opts = { seed: 1, maxIterations: 1e9, progressEvery: 500, timeBudgetMs: 0 };
+    // an infinite time budget is none: the segments are counted in iterations all the same
+    for (const timeBudgetMs of [undefined, Infinity]) {
+      const temperatures: number[] = [];
+      const opts = { seed: 1, maxIterations: 8000, progressEvery: 500, timeBudgetMs };
+      await search(g.ctx, g.rows, g.fixed, opts, (p) => {
+        temperatures.push(p.temperature);
+      });
+      // 4 segments of 2000 iterations, a report after every 500: T = 60 * (0.3 / 60)^f after
+      // about a quarter, a half, three quarters and all of a segment is 16, 4.25, 1.13 and 0.30
+      const want = [16, 4.25, 1.13, 0.3];
+      expect(temperatures).toHaveLength(16);
+      temperatures.forEach((t, k) => expect(Math.abs(t / want[k % 4] - 1)).toBeLessThan(0.02));
+    }
+  });
+
+  it('with a time budget, cools every segment in its share of the time', async () => {
+    const g = jan();
+    const temperatures: number[] = [];
+    const opts = { seed: 1, maxIterations: 1e9, timeBudgetMs: 400, progressEvery: 10 };
+    const begin = performance.now();
+    const r = await search(g.ctx, g.rows, g.fixed, opts, (p) => {
+      temperatures.push(p.temperature);
+    });
+    const took = performance.now() - begin;
+
+    // The temperature falls within a segment and rises when the next one starts from the best:
+    // 4 segments, each starting hot (60) and cooling to near 0.3 before its time is up. Each
+    // report reads the clock, and time passes between two, so it falls at every report.
+    const segments: number[][] = [[]];
+    temperatures.forEach((t, k) => {
+      if (k > 0 && t > temperatures[k - 1]) segments.push([]);
+      segments[segments.length - 1].push(t);
+    });
+    expect(segments).toHaveLength(4);
+    for (const segment of segments) {
+      expect(Math.max(...segment)).toBeGreaterThan(10);
+      expect(Math.min(...segment)).toBeLessThan(2);
+      segment.slice(1).forEach((t, k) => expect(t).toBeLessThan(segment[k]));
+    }
+    // It ends when the budget is spent, not after its billion iterations.
+    expect(took).toBeGreaterThanOrEqual(400);
+    expect(took).toBeLessThan(400 + 1500);
+    expect(r.iterations).toBeLessThan(1e9);
+  });
+
+  it('with a time budget, still stops after maxIterations', async () => {
+    const g = jan();
+    const opts = { seed: 1, maxIterations: 3000, timeBudgetMs: 60_000 };
     const r = await search(g.ctx, g.rows, g.fixed, opts);
-    expect(r.iterations).toBe(500);
+    expect(r.iterations).toBe(3000);
+  });
+
+  it('returns its first draft when the time budget is already spent', async () => {
+    const g = jan();
+    const st = new SearchState(g.ctx, g.rows, g.fixed);
+    construct(st, mulberry32(1));
+    const opts = { seed: 1, maxIterations: 1e9, timeBudgetMs: 0 };
+    const r = await search(g.ctx, g.rows, g.fixed, opts);
+    expect(r.iterations).toBe(0);
+    expect(r.rows).toEqual(st.rows);
   });
 });

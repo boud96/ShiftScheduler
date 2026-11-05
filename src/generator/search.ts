@@ -5,13 +5,19 @@ import { mulberry32 } from './rng';
 import { SearchState } from './state';
 
 export interface SearchOptions {
-  /** The seed of the random numbers. The same inputs, seed and iterations give the same result. */
+  /**
+   * The seed of the random numbers. Without a time budget, the same inputs, seed and
+   * `maxIterations` give the same result.
+   */
   seed: number;
-  /** How many iterations (one move tried each) to run, over all the segments together. */
+  /** The most iterations (one move tried each) to run, over all the segments together. */
   maxIterations: number;
-  /** Stop once this many milliseconds have passed, keeping the best month so far. */
+  /**
+   * The time the search may take, in milliseconds. With it the segments are timed: each gets its
+   * share of the time and cools by the clock. Without it they are counted in iterations.
+   */
   timeBudgetMs?: number;
-  /** How many segments the iterations are split into (default 4); see `search`. */
+  /** How many segments the search is split into (default 4); see `search`. */
   restarts?: number;
   /** Iterations between two progress reports (default 2000). */
   progressEvery?: number;
@@ -28,6 +34,8 @@ export interface SearchProgress {
   bestMustUnits: number;
   /** Milliseconds since the search started. */
   elapsedMs: number;
+  /** The temperature at this point of the current segment, which falls from 60 to 0.3. */
+  temperature: number;
 }
 
 export interface SearchResult {
@@ -48,10 +56,16 @@ const PROGRESS_EVERY = 2000;
 /** The temperature at the start of each segment, and the one it has cooled down to by its end. */
 const START_TEMPERATURE = 60;
 const END_TEMPERATURE = 0.3;
+/** With a time budget, the clock is read every this many iterations and at each report. */
+const CLOCK_EVERY = 256;
 
-/** The temperature after `i` of the `len` iterations of a segment: it falls geometrically. */
-function temperature(i: number, len: number): number {
-  return START_TEMPERATURE * Math.pow(END_TEMPERATURE / START_TEMPERATURE, i / len);
+/**
+ * The temperature once `fraction` of a segment has passed, of its iterations or of its time. It
+ * falls geometrically from START_TEMPERATURE at 0 to END_TEMPERATURE at 1, and stays there.
+ */
+function temperature(fraction: number): number {
+  if (!(fraction < 1)) return END_TEMPERATURE;
+  return START_TEMPERATURE * Math.pow(END_TEMPERATURE / START_TEMPERATURE, fraction);
 }
 
 /** Lets other work run first, such as a worker taking in a message to stop. */
@@ -66,14 +80,21 @@ function pause(): Promise<void> {
  * none. A shift left uncovered (M1) or hours below FPD (M6) cost far more than any wish, so it
  * leaves one only where it finds no way around it.
  *
- * The iterations are split into `restarts` segments. The first starts from the draft `construct`
- * builds, each later one from the best month so far. In each segment the temperature T falls from
- * 60 to 0.3. A move that makes the score worse by `delta` is kept with probability exp(-delta / T),
- * any other always; exp(-HARD / 60) is 0, so a move that costs HARD is never kept.
+ * It runs in `restarts` segments. The first starts from the draft `construct` builds, each later
+ * one from the best month so far. In each segment the temperature T falls from 60 to 0.3. A move
+ * that makes the score worse by `delta` is kept with probability exp(-delta / T), any other
+ * always; exp(-HARD / 60) is 0, so a move that costs HARD is never kept.
+ *
+ * - Without a time budget, each segment runs its share of `maxIterations`, and T follows the
+ *   iterations done in it. The result then depends only on the inputs, the seed and
+ *   `maxIterations`.
+ * - With a time budget, the segments share in equal parts the time that `construct` has left,
+ *   and T follows the time passed in the segment, read from the clock every CLOCK_EVERY
+ *   iterations and at each progress report. A segment ends when its time is up, and the search
+ *   when the last one does, or after `maxIterations` in all.
  *
  * Every `progressEvery` iterations it lets other work run, reports progress, and stops if
- * `shouldStop` says so or the time budget has run out. Without a time budget the result depends
- * only on the inputs, the seed and `maxIterations`.
+ * `shouldStop` says so or the time budget has run out.
  */
 export async function search(
   ctx: MonthContext,
@@ -88,6 +109,8 @@ export async function search(
   // Infinity is cut to a number the segments can be counted with; NaN counts as none.
   const iterations =
     Math.min(Math.max(Math.floor(opts.maxIterations), 0), Number.MAX_SAFE_INTEGER) || 0;
+  // A budget that is not a finite number (Infinity) is no budget.
+  const budget = Number.isFinite(opts.timeBudgetMs) ? opts.timeBudgetMs : undefined;
   const rnd = mulberry32(opts.seed);
 
   const st = new SearchState(ctx, rows, fixed);
@@ -103,15 +126,28 @@ export async function search(
     iterations: done,
   });
 
-  for (let k = 0; k < restarts; k++) {
+  // With a time budget, segment k has the time from k to k + 1 times `segmentMs` after `begin`.
+  const begin = performance.now();
+  const segmentMs = budget === undefined ? 0 : Math.max(0, budget - (begin - started)) / restarts;
+
+  for (let k = 0; k < restarts && done < iterations; k++) {
     if (k > 0) st.reset(best);
+    const from = begin + k * segmentMs;
+    // The iterations the segment may run: without a time budget its share, with one all that are
+    // left, since its time ends it.
     const len =
-      Math.floor(((k + 1) * iterations) / restarts) - Math.floor((k * iterations) / restarts);
+      budget === undefined
+        ? Math.floor(((k + 1) * iterations) / restarts) - Math.floor((k * iterations) / restarts)
+        : iterations - done;
+    let fraction = 0; // how much of the segment has passed: of its iterations, or of its time
     for (let i = 0; i < len; i++) {
+      if (budget === undefined) fraction = i / len;
+      else if (i % CLOCK_EVERY === 0) fraction = (performance.now() - from) / segmentMs;
+      if (!(fraction < 1)) break; // the segment's time is up
       const move = proposeMove(st, rnd);
       if (move !== null) {
         const delta = st.tryMove(move);
-        if (delta <= 0 || rnd() < Math.exp(-delta / temperature(i, len))) {
+        if (delta <= 0 || rnd() < Math.exp(-delta / temperature(fraction))) {
           st.commit();
           if (st.score < bestScore) {
             bestScore = st.score;
@@ -126,9 +162,17 @@ export async function search(
       done++;
       if (done % progressEvery === 0) {
         await pause();
-        const elapsedMs = performance.now() - started;
-        onProgress?.({ iteration: done, bestScore, bestMustUnits, elapsedMs });
-        const outOfTime = opts.timeBudgetMs !== undefined && elapsedMs >= opts.timeBudgetMs;
+        const now = performance.now();
+        if (budget !== undefined) fraction = (now - from) / segmentMs;
+        const elapsedMs = now - started;
+        onProgress?.({
+          iteration: done,
+          bestScore,
+          bestMustUnits,
+          elapsedMs,
+          temperature: temperature(fraction),
+        });
+        const outOfTime = budget !== undefined && elapsedMs >= budget;
         if (opts.shouldStop?.() === true || outOfTime) return result();
       }
     }
