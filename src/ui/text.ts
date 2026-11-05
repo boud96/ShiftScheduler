@@ -42,8 +42,11 @@ export const SAVE_BAR = {
   save: 'Uložit do souboru',
   open: 'Otevřít soubor',
   unsaved: 'Změny nejsou uložené do souboru',
-  /** Asked before another file is opened while there are changes that are not in a file. */
+  /** The dialog that asks before another file is opened while changes are not in a file. */
+  confirmTitle: 'Neuložené změny',
   confirmOpen: 'Změny, které nejsou uložené do souboru, se ztratí. Otevřít jiný soubor?',
+  confirmYes: 'Otevřít jiný soubor',
+  confirmNo: 'Zrušit',
   auto: (fileName: string | null): string =>
     `Ukládá se automaticky do ${fileName ?? 'souboru'}`,
   /** `time` is the local time as `H:MM`. */

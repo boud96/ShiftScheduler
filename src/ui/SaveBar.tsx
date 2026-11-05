@@ -1,3 +1,5 @@
+import { useId, useRef, useState } from 'react';
+import type { KeyboardEvent, MouseEvent } from 'react';
 import { useApp } from './store';
 import type { FileStatus } from './store';
 import { SAVE_BAR } from './text';
@@ -16,15 +18,73 @@ function status(file: FileStatus): { state: 'unsaved' | 'auto' | 'saved'; text: 
   return { state: 'unsaved', text: SAVE_BAR.unsaved };
 }
 
+/**
+ * The question that comes before another file replaces changes that are not in a file. It is a
+ * dialog on the page and not `window.confirm`: a browser opens a file picker only for a click that
+ * is fresh, about five seconds, and a box that waits for an answer uses that click up. The click on
+ * the button that says yes is a new one.
+ */
+function OpenQuestion({ onYes, onNo }: { onYes: () => void; onNo: () => void }) {
+  const titleId = useId();
+  const textId = useId();
+  const yes = useRef<HTMLButtonElement>(null);
+  const no = useRef<HTMLButtonElement>(null);
+
+  const onKeyDown = (e: KeyboardEvent<HTMLElement>) => {
+    if (e.key === 'Escape') onNo();
+    // There are two buttons, so Tab and Shift+Tab both go to the other one: the focus stays here.
+    if (e.key === 'Tab') {
+      e.preventDefault();
+      (document.activeElement === no.current ? yes : no).current?.focus();
+    }
+  };
+
+  // A click on the page behind or on the text must not take the focus out of the dialog.
+  const keepFocus = (e: MouseEvent<HTMLElement>) => {
+    if (!(e.target instanceof HTMLButtonElement)) e.preventDefault();
+  };
+
+  return (
+    <div className="dialog-backdrop" onKeyDown={onKeyDown} onMouseDown={keepFocus}>
+      <div
+        role="alertdialog"
+        aria-modal="true"
+        aria-labelledby={titleId}
+        aria-describedby={textId}
+        className="dialog"
+      >
+        <h2 id={titleId}>{SAVE_BAR.confirmTitle}</h2>
+        <p id={textId}>{SAVE_BAR.confirmOpen}</p>
+        <div className="dialog-actions">
+          <button type="button" className="button" ref={yes} onClick={onYes}>
+            {SAVE_BAR.confirmYes}
+          </button>
+          <button type="button" className="button button-primary" ref={no} autoFocus onClick={onNo}>
+            {SAVE_BAR.confirmNo}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 /** Always within reach: where the data is saved, and the buttons to save it and to open a file. */
 export function SaveBar() {
   const { file, saveFile, openFile } = useApp();
+  const [asking, setAsking] = useState(false);
+  const opener = useRef<HTMLButtonElement>(null);
   const { state, text } = status(file);
 
-  // Opening switches the file at once, so the question has to come first.
   const open = () => {
-    if (file.dirty && !window.confirm(SAVE_BAR.confirmOpen)) return;
-    void openFile();
+    if (file.dirty) setAsking(true); // changes that are not in a file would be lost: ask first
+    else void openFile();
+  };
+
+  const answer = (yes: boolean) => {
+    // The picker has to open from this very click, so the store is called first, and at once.
+    if (yes) void openFile();
+    setAsking(false);
+    opener.current?.focus();
   };
 
   return (
@@ -35,9 +95,10 @@ export function SaveBar() {
       <button type="button" className="button" onClick={() => void saveFile()}>
         {SAVE_BAR.save}
       </button>
-      <button type="button" className="button" onClick={open}>
+      <button type="button" className="button" ref={opener} onClick={open}>
         {SAVE_BAR.open}
       </button>
+      {asking && <OpenQuestion onYes={() => answer(true)} onNo={() => answer(false)} />}
     </div>
   );
 }

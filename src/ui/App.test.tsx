@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { render, screen, within } from '@testing-library/react';
+import { fireEvent, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { useState } from 'react';
 import type { ComponentProps } from 'react';
@@ -14,7 +14,7 @@ import type { AppData } from '../domain/types';
 import { SaveFileError } from '../storage/saveFile';
 
 afterEach(() => {
-  vi.restoreAllMocks(); // the confirm spies
+  vi.restoreAllMocks(); // the spies
   vi.useRealTimers(); // the clock
 });
 
@@ -71,6 +71,12 @@ function otherPlan(): AppData {
 
 const abortError = () => new DOMException('The user aborted a request.', 'AbortError');
 
+/** Opens another file over changes that are not in a file: asks, then answers yes. */
+async function openAnyway() {
+  await userEvent.click(screen.getByRole('button', { name: 'Otevřít soubor' }));
+  await userEvent.click(screen.getByRole('button', { name: 'Otevřít jiný soubor' }));
+}
+
 // --- The brief's tests -----------------------------------------------------------------------
 
 it('shows the start screen when nothing is cached, then the app', async () => {
@@ -97,8 +103,7 @@ it('opens the app directly from the cache', () => {
 
 it('keeps data and shows the error when a file is broken', async () => {
   // Ruled deviation: the data comes from the cache, so it is not known to be in a file, and
-  // opening another file asks first.
-  vi.spyOn(window, 'confirm').mockReturnValue(true);
+  // opening another file asks first, in a dialog on the page (R33, R38). The test says yes.
   const s = memoryStorage(newAppData());
   s.openFile = async () => {
     throw new SaveFileError('Soubor je poškozený.');
@@ -108,7 +113,7 @@ it('keeps data and shows the error when a file is broken', async () => {
       <App />
     </AppProvider>,
   );
-  await userEvent.click(screen.getByRole('button', { name: 'Otevřít soubor' }));
+  await openAnyway();
   expect(await screen.findByText('Soubor je poškozený.')).toBeInTheDocument();
   expect(screen.getByRole('tab', { name: 'Měsíc' })).toBeInTheDocument();
 });
@@ -137,6 +142,7 @@ describe('the start screen', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Otevřít soubor' }));
     expect(await screen.findByRole('tab', { name: 'Měsíc' })).toBeInTheDocument();
     expect(screen.getByText('Uloženo do souboru 9:05')).toBeInTheDocument();
+    expect(screen.queryByRole('alertdialog')).toBeNull();
     expect(confirm).not.toHaveBeenCalled();
   });
 
@@ -297,34 +303,116 @@ describe('the save bar', () => {
     expect(screen.getByText('Ukládá se automaticky do plan.json')).toBeInTheDocument();
   });
 
-  it('asks before opening another file while changes are not in a file', async () => {
-    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(true);
-    const storage = memoryStorage(newAppData());
-    storage.openFile = async () => otherPlan();
-    renderApp(storage);
+});
 
-    await userEvent.click(screen.getByRole('button', { name: 'Otevřít soubor' }));
-    expect(confirm).toHaveBeenCalledExactlyOnceWith(CONFIRM_OPEN);
-    expect(await screen.findByText(/^Uloženo do souboru/)).toBeInTheDocument();
+// --- The question before another file is opened -----------------------------------------------
+
+describe('the question before another file is opened', () => {
+  const ask = () => userEvent.click(screen.getByRole('button', { name: 'Otevřít soubor' }));
+  const dialog = () => screen.getByRole('alertdialog', { name: 'Neuložené změny' });
+  const button = (name: string) => within(dialog()).getByRole('button', { name });
+
+  it('is a dialog on the page, named and described, with the focus on Zrušit', async () => {
+    const confirm = vi.spyOn(window, 'confirm');
+    renderApp(memoryStorage(newAppData()));
+    expect(screen.queryByRole('alertdialog')).toBeNull();
+
+    await ask();
+    expect(dialog()).toHaveAccessibleDescription(CONFIRM_OPEN);
+    expect(within(dialog()).getByText(CONFIRM_OPEN)).toBeVisible();
+    expect(dialog()).toHaveAttribute('aria-modal', 'true');
+    const buttons = within(dialog()).getAllByRole('button');
+    expect(buttons.map((b) => b.textContent)).toEqual(['Otevřít jiný soubor', 'Zrušit']);
+    expect(button('Zrušit')).toHaveFocus();
+    expect(confirm).not.toHaveBeenCalled(); // the browser's own box is never used
   });
 
-  it('opens nothing and keeps the data when the question is declined', async () => {
-    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false);
+  it('opens the file on Otevřít jiný soubor, and the question goes away', async () => {
     const storage = memoryStorage(newAppData());
     const openFile = vi.fn(async () => otherPlan());
     storage.openFile = openFile;
     renderApp(storage);
 
-    await userEvent.click(screen.getByRole('button', { name: 'Otevřít soubor' }));
-    expect(confirm).toHaveBeenCalledExactlyOnceWith(CONFIRM_OPEN);
+    await openAnyway();
+    expect(openFile).toHaveBeenCalledOnce();
+    expect(await screen.findByText(/^Uloženo do souboru/)).toBeInTheDocument();
+    expect(screen.queryByRole('alertdialog')).toBeNull();
+  });
+
+  it('opens the picker straight from the click on Otevřít jiný soubor', async () => {
+    // A browser opens a file picker only for a click that is fresh, so nothing may be awaited, and
+    // no box may stay open, between that click and the call that opens it.
+    const storage = memoryStorage(newAppData());
+    const openFile = vi.fn(async () => otherPlan());
+    storage.openFile = openFile;
+    renderApp(storage);
+    await ask();
+    expect(openFile).not.toHaveBeenCalled();
+
+    fireEvent.click(button('Otevřít jiný soubor'));
+    expect(openFile).toHaveBeenCalledOnce(); // within the click, not after it
+    await screen.findByText(/^Uloženo do souboru/);
+  });
+
+  it('opens nothing and keeps the data on Zrušit', async () => {
+    const storage = memoryStorage(newAppData());
+    const openFile = vi.fn(async () => otherPlan());
+    storage.openFile = openFile;
+    renderApp(storage);
+
+    await ask();
+    await userEvent.click(button('Zrušit'));
+    expect(screen.queryByRole('alertdialog')).toBeNull();
     expect(openFile).not.toHaveBeenCalled();
     expect(screen.getByText('Změny nejsou uložené do souboru')).toBeInTheDocument();
     expect(screen.getByRole('tab', { name: 'Měsíc' })).toBeInTheDocument();
     expect(screen.queryByRole('alert')).toBeNull();
-    expect(storage.loadCache()).toEqual(newAppData());
+    expect(screen.getByRole('button', { name: 'Otevřít soubor' })).toHaveFocus();
   });
 
-  it('does not ask when everything is in the file', async () => {
+  it('opens nothing and keeps the data on Escape', async () => {
+    const storage = memoryStorage(newAppData());
+    const openFile = vi.fn(async () => otherPlan());
+    storage.openFile = openFile;
+    renderApp(storage);
+
+    await ask();
+    expect(dialog()).toBeVisible();
+    await userEvent.keyboard('{Escape}');
+    expect(screen.queryByRole('alertdialog')).toBeNull();
+    expect(openFile).not.toHaveBeenCalled();
+    expect(screen.getByText('Změny nejsou uložené do souboru')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Otevřít soubor' })).toHaveFocus();
+  });
+
+  it('keeps the focus on its two buttons', async () => {
+    renderApp(memoryStorage(newAppData()));
+    await ask();
+    expect(button('Zrušit')).toHaveFocus();
+
+    await userEvent.tab();
+    expect(button('Otevřít jiný soubor')).toHaveFocus();
+    await userEvent.tab();
+    expect(button('Zrušit')).toHaveFocus();
+    await userEvent.tab({ shift: true });
+    expect(button('Otevřít jiný soubor')).toHaveFocus();
+    await userEvent.tab({ shift: true });
+    expect(button('Zrušit')).toHaveFocus();
+  });
+
+  it('keeps the focus when its text or the page behind is clicked, so Escape works', async () => {
+    renderApp(memoryStorage(newAppData()));
+    await ask();
+    await userEvent.click(within(dialog()).getByText(CONFIRM_OPEN));
+    expect(button('Zrušit')).toHaveFocus();
+    await userEvent.click(dialog().parentElement as HTMLElement); // the dimmed page behind it
+    expect(button('Zrušit')).toHaveFocus();
+
+    await userEvent.keyboard('{Escape}');
+    expect(screen.queryByRole('alertdialog')).toBeNull();
+  });
+
+  it('is not asked when everything is in the file', async () => {
     const confirm = vi.spyOn(window, 'confirm');
     const storage = memoryStorage(newAppData());
     const openFile = vi.fn(async () => null);
@@ -333,20 +421,20 @@ describe('the save bar', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Uložit do souboru' }));
     await screen.findByText(/^Uloženo do souboru/);
 
-    await userEvent.click(screen.getByRole('button', { name: 'Otevřít soubor' }));
+    await ask();
+    expect(screen.queryByRole('alertdialog')).toBeNull();
     expect(confirm).not.toHaveBeenCalled();
     expect(openFile).toHaveBeenCalledOnce();
   });
 
-  it('asks again after the next change', async () => {
-    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false);
+  it('is asked again after the next change', async () => {
     renderApp(memoryStorage(newAppData()));
     await userEvent.click(screen.getByRole('button', { name: 'Uložit do souboru' }));
     await screen.findByText(/^Uloženo do souboru/);
     await userEvent.click(screen.getByRole('button', { name: 'Změnit' }));
 
-    await userEvent.click(screen.getByRole('button', { name: 'Otevřít soubor' }));
-    expect(confirm).toHaveBeenCalledOnce();
+    await ask();
+    expect(dialog()).toBeVisible();
   });
 });
 
@@ -354,13 +442,12 @@ describe('the save bar', () => {
 
 describe('errors', () => {
   it('shows a general message when the file cannot be opened for another reason', async () => {
-    vi.spyOn(window, 'confirm').mockReturnValue(true);
     const storage = memoryStorage(newAppData());
     storage.openFile = async () => {
       throw new Error('boom');
     };
     renderApp(storage);
-    await userEvent.click(screen.getByRole('button', { name: 'Otevřít soubor' }));
+    await openAnyway();
     expect(await screen.findByRole('alert')).toHaveTextContent('Soubor se nepodařilo otevřít.');
   });
 
@@ -376,7 +463,6 @@ describe('errors', () => {
   });
 
   it('shows nothing when the user cancels a picker', async () => {
-    vi.spyOn(window, 'confirm').mockReturnValue(true);
     const storage = memoryStorage(newAppData());
     storage.openFile = async () => {
       throw abortError();
@@ -385,7 +471,7 @@ describe('errors', () => {
       throw abortError();
     };
     renderApp(storage);
-    await userEvent.click(screen.getByRole('button', { name: 'Otevřít soubor' }));
+    await openAnyway();
     await userEvent.click(screen.getByRole('button', { name: 'Uložit do souboru' }));
     expect(screen.queryByRole('alert')).toBeNull();
     expect(screen.getByRole('tab', { name: 'Měsíc' })).toBeInTheDocument();
