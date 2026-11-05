@@ -1,5 +1,6 @@
 import { CODE_NAMES, Code, isShift } from '../codes';
 import type { MonthContext } from '../context';
+import { fmtH, twelveShifts as fmtTwelveShifts } from '../format';
 import { twelveDays } from './personMusts';
 import { report } from './personWishes';
 import type { PersonStats, Sink } from './types';
@@ -24,7 +25,7 @@ function twelveShifts(
   const gap = stats.twelve - twelveTarget;
   const penalty = gap * gap * ctx.weights.W5a;
   if (sink !== undefined && penalty > 0) {
-    const message = `${stats.twelve} dvanáctihodinových směn (cíl ${twelveTarget})`;
+    const message = `${fmtTwelveShifts(stats.twelve)} (cíl ${fmtH(twelveTarget)})`;
     report(sink, 'W5a', p, twelveDays(ctx, row), message, penalty);
   }
   return penalty;

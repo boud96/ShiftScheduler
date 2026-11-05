@@ -171,6 +171,23 @@ describe('M5 in detail', () => {
     expect(rules(run(z, rowsOf(z, [five])), 'M5')[0].message)
       .toBe('5 dvanáctihodinových směn (max. 4)');
   });
+  it('puts the count in the Czech form: 1, 2 to 4, and 5 or more', () => {
+    // a maximum of 0, so that every count is over it; the month has 8 weekend days
+    const none = ctxFor('2027-02', 1, { maxTwelvePerMonth: 0 });
+    const message = (count: number) => {
+      const weekend = [5, 6, 12, 13, 19, 20, 26, 27].slice(0, count);
+      const strip = Array.from({ length: 28 }, (_, d) => (weekend.includes(d) ? 'R12' : '-'));
+      return rules(run(none, rowsOf(none, [strip.join(' ')])), 'M5')[0].message;
+    };
+    expect([1, 2, 3, 4, 5, 8].map(message)).toEqual([
+      '1 dvanáctihodinová směna (max. 0)',
+      '2 dvanáctihodinové směny (max. 0)',
+      '3 dvanáctihodinové směny (max. 0)',
+      '4 dvanáctihodinové směny (max. 0)',
+      '5 dvanáctihodinových směn (max. 0)',
+      '8 dvanáctihodinových směn (max. 0)',
+    ]);
+  });
 });
 
 describe('M6 in detail', () => {

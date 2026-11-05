@@ -9,3 +9,17 @@ export function days(n: number): string {
   const form = n === 1 ? 'den' : n >= 2 && n <= 4 ? 'dny' : 'dní';
   return `${n} ${form}`;
 }
+
+/**
+ * A number of 12-hour shifts with the Czech plural: 1 dvanáctihodinová směna, 2-4 dvanáctihodinové
+ * směny, 0 and 5 or more dvanáctihodinových směn.
+ */
+export function twelveShifts(n: number): string {
+  const form =
+    n === 1
+      ? 'dvanáctihodinová směna'
+      : n >= 2 && n <= 4
+        ? 'dvanáctihodinové směny'
+        : 'dvanáctihodinových směn';
+  return `${n} ${form}`;
+}

@@ -8,7 +8,7 @@ import {
   isWeekdayShift,
 } from '../codes';
 import type { MonthContext } from '../context';
-import { fmtH } from '../format';
+import { fmtH, twelveShifts } from '../format';
 import type { ShiftName } from '../types';
 import type { MustId, PersonStats, Sink } from './types';
 import { BELOW_FPD, HARD } from './weights';
@@ -131,7 +131,7 @@ export function personMusts(
     score += HARD * excess;
     units += excess;
     if (sink !== undefined) {
-      const message = `${stats.twelve} dvanáctihodinových směn (max. ${maxTwelve})`;
+      const message = `${twelveShifts(stats.twelve)} (max. ${maxTwelve})`;
       report(sink, 'M5', p, twelveDays(ctx, row), message, HARD * excess);
     }
   }

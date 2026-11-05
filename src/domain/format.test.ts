@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { fmtH, days } from './format';
+import { fmtH, days, twelveShifts } from './format';
 
 describe('fmtH', () => {
   it('prints whole hours without a decimal part', () => {
@@ -29,5 +29,21 @@ describe('days', () => {
     expect(days(11)).toBe('11 dní');
     expect(days(21)).toBe('21 dní');
     expect(days(22)).toBe('22 dní');
+  });
+});
+
+describe('twelveShifts', () => {
+  it('uses the Czech plural forms of "dvanáctihodinová směna"', () => {
+    expect(twelveShifts(1)).toBe('1 dvanáctihodinová směna');
+    expect(twelveShifts(2)).toBe('2 dvanáctihodinové směny');
+    expect(twelveShifts(3)).toBe('3 dvanáctihodinové směny');
+    expect(twelveShifts(4)).toBe('4 dvanáctihodinové směny');
+    expect(twelveShifts(5)).toBe('5 dvanáctihodinových směn');
+  });
+  it('treats 0 and the numbers from 5 up as the many form', () => {
+    expect(twelveShifts(0)).toBe('0 dvanáctihodinových směn');
+    expect(twelveShifts(11)).toBe('11 dvanáctihodinových směn');
+    expect(twelveShifts(21)).toBe('21 dvanáctihodinových směn');
+    expect(twelveShifts(22)).toBe('22 dvanáctihodinových směn');
   });
 });

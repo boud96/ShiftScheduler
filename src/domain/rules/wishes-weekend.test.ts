@@ -96,11 +96,33 @@ const listed = (fs: Finding[], ctx: MonthContext = c) =>
 describe('W5a in detail', () => {
   it('lists the 12-hour shifts of the month and the target, with the cells and the text', () => {
     expect(listed(found('W5a', '- - - - - R12'))).toEqual([
-      { message: '1 dvanáctihodinových směn (cíl 2)', days: [5], units: 1 },
+      { message: '1 dvanáctihodinová směna (cíl 2)', days: [5], units: 1 },
     ]);
     // R12 and N12 are counted alike
     expect(listed(found('W5a', at({ 5: 'N12', 6: 'N12', 12: 'R12', 13: 'R12' })))).toEqual([
-      { message: '4 dvanáctihodinových směn (cíl 2)', days: [5, 6, 12, 13], units: 4 },
+      { message: '4 dvanáctihodinové směny (cíl 2)', days: [5, 6, 12, 13], units: 4 },
+    ]);
+  });
+  it('puts the count in the Czech form: 1, 2 to 4, and 5 or more or none', () => {
+    // a target far from every count, so that each one has a finding
+    const far = ctxFor('2027-02', 1, { twelveTarget: 10 });
+    const message = (n: number) => {
+      const strip = at(Object.fromEntries([5, 6, 12, 13, 19].slice(0, n).map((d) => [d, 'R12'])));
+      return found('W5a', strip, [], far)[0].message;
+    };
+    expect([0, 1, 2, 3, 4, 5].map(message)).toEqual([
+      '0 dvanáctihodinových směn (cíl 10)',
+      '1 dvanáctihodinová směna (cíl 10)',
+      '2 dvanáctihodinové směny (cíl 10)',
+      '3 dvanáctihodinové směny (cíl 10)',
+      '4 dvanáctihodinové směny (cíl 10)',
+      '5 dvanáctihodinových směn (cíl 10)',
+    ]);
+  });
+  it('prints a target that is not whole with a decimal comma', () => {
+    const k = ctxFor('2027-02', 1, { twelveTarget: 2.5 });
+    expect(listed(found('W5a', '- - - - - R12 R12', [], k), k)).toEqual([
+      { message: '2 dvanáctihodinové směny (cíl 2,5)', days: [5, 6], units: 0.25 },
     ]);
   });
   it('asks the square of the distance from the target', () => {
@@ -119,7 +141,7 @@ describe('W5a in detail', () => {
   it('follows the target in the settings', () => {
     const k = ctxFor('2027-02', 1, { twelveTarget: 3 });
     expect(listed(found('W5a', '- - - - - R12 R12', [], k), k)).toEqual([
-      { message: '2 dvanáctihodinových směn (cíl 3)', days: [5, 6], units: 1 },
+      { message: '2 dvanáctihodinové směny (cíl 3)', days: [5, 6], units: 1 },
     ]);
     expect(found('W5a', '- - - - - R12 R12 | - - - - - R12', [], k)).toEqual([]);
   });
@@ -134,7 +156,7 @@ describe('W5a in detail', () => {
       severity: 'wish',
       person: 0,
       days: [c.first + 5],
-      message: '1 dvanáctihodinových směn (cíl 2)',
+      message: '1 dvanáctihodinová směna (cíl 2)',
       penalty: c.weights.W5a,
     }]);
   });
