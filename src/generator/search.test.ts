@@ -6,12 +6,14 @@ import { evaluateMonth } from '../domain/rules/evaluate';
 import { Code } from '../domain/codes';
 import { syntheticTeam } from '../test/team';
 import { SearchState } from './state';
-import { proposeMove } from './moves';
+import { leavesTooLittleRest, proposeMove } from './moves';
 import { construct } from './construct';
 import { search } from './search';
 import { mulberry32 } from './rng';
-import type { MonthContext } from '../domain/context';
+import type { MonthContext, MonthGrid } from '../domain/context';
 import { HARD } from '../domain/rules/weights';
+import type { Settings } from '../domain/types';
+import { scenario } from '../test/scenarios';
 
 const jan = () => { const d = newAppData(); d.people = syntheticTeam(); return buildMonthGrid(d, '2027-01'); };
 
@@ -305,5 +307,107 @@ describe('generator limits', () => {
     const r = await search(g.ctx, g.rows, g.fixed, opts);
     expect(r.iterations).toBe(0);
     expect(r.rows).toEqual(st.rows);
+  });
+});
+
+describe('rest pre-filter', () => {
+  /** How many pairs of days with too little rest the engine finds (M2). */
+  const restBreaks = (ctx: MonthContext, rows: Uint8Array[]) =>
+    evaluateMonth(ctx, rows, true).findings.filter((f) => f.rule === 'M2').length;
+
+  /**
+   * Rows with a random code that fits the day in every free cell of the month, and then, until
+   * the engine finds no pair of days with too little rest, the later shift of each such pair
+   * emptied. Many shifts are covered twice: a must that costs HARD is broken all along.
+   */
+  function randomRows(g: MonthGrid, rnd: () => number): Uint8Array[] {
+    const { ctx } = g;
+    const rows = g.rows.map((row) => row.slice());
+    rows.forEach((row, p) => {
+      for (let i = ctx.first; i < row.length; i++) {
+        if (g.fixed[p][i] !== 0) continue;
+        const choices =
+          ctx.days[i].dayType === 'weekday'
+            ? [Code.EMPTY, Code.EMPTY, Code.R1, Code.R2, Code.O20, Code.O, Code.N]
+            : [Code.EMPTY, Code.EMPTY, Code.R12, Code.N12];
+        row[i] = choices[Math.floor(rnd() * choices.length)];
+      }
+    });
+    for (;;) {
+      const short = evaluateMonth(ctx, rows, true).findings.filter((f) => f.rule === 'M2');
+      if (short.length === 0) return rows;
+      for (const f of short) rows[f.person as number][f.days[1]] = Code.EMPTY;
+    }
+  }
+
+  // The rest rule comes from the settings: the defaults, a shorter and a longer rest, other times.
+  const variants: Array<[string, (s: Settings) => void]> = [
+    ['12 h of rest', () => {}],
+    ['10 h of rest', (s) => (s.minRestHours = 10)],
+    [
+      '14 h of rest, R2 from 7:00 to 15:00',
+      (s) => {
+        s.minRestHours = 14;
+        s.shifts.R2 = { start: 420, end: 900, hours: 7.5 };
+      },
+    ],
+  ];
+
+  it.each(variants)(
+    'tells exactly the moves after which the engine finds too little rest (%s)',
+    (_, adjust) => {
+      const { data, month } = scenario('jan2027'); // a tail of nights, and requests
+      adjust(data.settings);
+      const g = buildMonthGrid(data, month);
+      const rnd = mulberry32(31);
+      const st = new SearchState(g.ctx, randomRows(g, rnd), g.fixed);
+      expect(restBreaks(g.ctx, st.rows)).toBe(0);
+      // with a HARD must broken, every pick is proposed, those that leave too little rest too
+      expect(st.score).toBeGreaterThan(HARD);
+
+      let flagged = 0;
+      let passed = 0;
+      for (let k = 0; k < 2000; k++) {
+        const m = proposeMove(st, rnd);
+        if (!m) continue;
+        const verdict = leavesTooLittleRest(st, m);
+        st.tryMove(m);
+        expect(restBreaks(g.ctx, st.rows) > 0, JSON.stringify(m)).toBe(verdict);
+        if (verdict) flagged++;
+        else passed++;
+        // walk on, but never into a month with too little rest somewhere
+        if (!verdict && rnd() < 0.5) st.commit();
+        else st.revert();
+      }
+      expect(flagged).toBeGreaterThan(200);
+      expect(passed).toBeGreaterThan(200);
+    },
+  );
+
+  it('skips, while no HARD must is broken, only moves the search could never keep', () => {
+    const g = jan();
+    const st = new SearchState(g.ctx, g.rows, g.fixed);
+    const rnd = mulberry32(32);
+    construct(st, rnd);
+    expect(st.score).toBeLessThan(HARD / 2);
+    // the same month as if a HARD must were broken: nothing is skipped in it
+    const unfiltered = Object.create(st, { score: { get: () => HARD } }) as SearchState;
+
+    let skipped = 0;
+    for (let k = 0; k < 3000; k++) {
+      const u = proposeMove(unfiltered, rnd);
+      if (u && leavesTooLittleRest(st, u)) {
+        skipped++;
+        expect(st.tryMove(u)).toBeGreaterThan(HARD / 2);
+        st.revert();
+      }
+      const m = proposeMove(st, rnd);
+      if (!m) continue;
+      expect(leavesTooLittleRest(st, m)).toBe(false);
+      const delta = st.tryMove(m);
+      if (delta < HARD / 2 && rnd() < 0.5) st.commit();
+      else st.revert();
+    }
+    expect(skipped).toBeGreaterThan(300);
   });
 });

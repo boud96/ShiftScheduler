@@ -23,7 +23,7 @@ export interface SearchOptions {
    */
   timeBudgetMs?: number;
   /**
-   * How many segments the search is split into (default 4); see `search`. A value that is not a
+   * How many segments the search is split into (default 6); see `search`. A value that is not a
    * whole number of at least 1 once rounded down (0, NaN, Infinity) gives the default.
    */
   restarts?: number;
@@ -60,11 +60,19 @@ export interface SearchResult {
   iterations: number;
 }
 
-/** Segments of the search, unless the options say otherwise. */
-const RESTARTS = 4;
+/**
+ * Segments of the search, unless the options say otherwise. Most of what a segment gains, it
+ * gains while still hot, and a longer segment spends more of its time cold: at 300,000
+ * iterations, 6 segments did better on the scenario months than 4, 5 or 8.
+ */
+const RESTARTS = 6;
 /** Iterations between two progress reports, unless the options say otherwise. */
 const PROGRESS_EVERY = 2000;
-/** The temperature at the start of each segment, and the one it has cooled down to by its end. */
+/**
+ * The temperature at the start of each segment, and the one it has cooled down to by its end.
+ * `proposeMove` skips moves that leave too little rest because exp(-HARD / 2 / T) is 0 at these
+ * temperatures: a much hotter start would have to be checked against that.
+ */
 const START_TEMPERATURE = 60;
 const END_TEMPERATURE = 0.3;
 /** With a time budget, the clock is read every this many iterations and at each report. */
