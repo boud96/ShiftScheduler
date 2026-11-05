@@ -1,0 +1,273 @@
+import { createContext, useContext, useEffect, useMemo, useRef, useState } from 'react';
+import type { ReactNode } from 'react';
+import { newAppData } from '../domain/defaults';
+import type { AppData } from '../domain/types';
+import type { StorageAdapter } from '../storage/adapter';
+import { SaveFileError } from '../storage/saveFile';
+import type { GeneratorRunner } from '../worker/runner';
+import { reduce } from './reducer';
+import type { Action } from './reducer';
+import { FILE_ERRORS } from './text';
+
+/** How long a change waits for the next one before it goes to the cache, and to the file. */
+const CACHE_DELAY_MS = 300;
+const FILE_DELAY_MS = 1000;
+
+type Timer = ReturnType<typeof setTimeout>;
+
+export interface FileStatus {
+  /** The name of the file the data goes to, if there is one. */
+  name: string | null;
+  /** When the data was last saved to the file, or opened from it, as an ISO time. */
+  savedAt: string | null;
+  /**
+   * True when the file may lack changes. It is true for data that came from the cache or a new
+   * plan, since nothing says that a file holds them. It is not true while changes are written to
+   * the file by themselves.
+   */
+  dirty: boolean;
+  /** True when changes are written to the file by themselves. */
+  auto: boolean;
+}
+
+export interface AppStore {
+  /** The plan, or null until the user opens a file or starts a new one. */
+  data: AppData | null;
+  dispatch(action: Action): void;
+  file: FileStatus;
+  /** Lets the user pick a save file and replaces the data with it. Never rejects. */
+  openFile(): Promise<void>;
+  /** Saves to the file, or downloads it where the browser cannot write to one. Never rejects. */
+  saveFile(): Promise<void>;
+  /** Starts a new plan with placeholder people. */
+  newData(): void;
+  /** What went wrong with the last open or save, in Czech, or null. */
+  error: string | null;
+  dismissError(): void;
+  runner: GeneratorRunner;
+}
+
+const AppContext = createContext<AppStore | null>(null);
+
+export function useApp(): AppStore {
+  const store = useContext(AppContext);
+  if (store === null) throw new Error('useApp() needs an AppProvider above it.');
+  return store;
+}
+
+/** A cancelled picker: the browser rejects it with an AbortError. */
+function isAbort(e: unknown): boolean {
+  return typeof e === 'object' && e !== null && 'name' in e && e.name === 'AbortError';
+}
+
+/** What to tell the user about a failed open or save, or null if they only cancelled. */
+function messageFor(e: unknown, fallback: string): string | null {
+  if (isAbort(e)) return null;
+  return e instanceof SaveFileError ? e.message : fallback;
+}
+
+interface AppProviderProps {
+  storage: StorageAdapter;
+  runner: GeneratorRunner;
+  children: ReactNode;
+}
+
+/**
+ * Holds the plan and where it is saved. The save file is the real store: every change goes to the
+ * cache after 300 ms, and where the file can be written to without asking, to the file after 1 s.
+ * Elsewhere the changes are marked as not in the file. At most one write to the file runs at a
+ * time; a change that comes in during one is written after it, with the latest data.
+ */
+export function AppProvider({ storage, runner, children }: AppProviderProps) {
+  const [initial] = useState(() => {
+    const data = storage.loadCache();
+    const file: FileStatus = {
+      name: storage.fileName(),
+      savedAt: null,
+      dirty: data !== null,
+      auto: storage.canAutoSave(),
+    };
+    return { data, file };
+  });
+  const [data, setData] = useState(initial.data);
+  const [file, setFile] = useState(initial.file);
+  const [error, setError] = useState<string | null>(null);
+
+  // Timers and writes outlive the render that started them, so they read from these.
+  const latest = useRef(initial.data);
+  const timers = useRef<{ cache?: Timer; file?: Timer }>({});
+  const writes = useRef({
+    /** Ends when every write so far has. */
+    last: Promise.resolve() as Promise<unknown>,
+    /** Whether a write to the file is already waiting its turn. */
+    waiting: false,
+    /** Counts the files opened, so that a failed write can tell that its file was left behind. */
+    fileNo: 0,
+  });
+
+  const actions = useMemo(() => {
+    /** Reads what the storage knows now: the name of the file, and whether it saves by itself. */
+    const syncFile = (patch: Partial<FileStatus> = {}) =>
+      setFile((f) => ({ ...f, name: storage.fileName(), auto: storage.canAutoSave(), ...patch }));
+
+    const flushCache = () => {
+      if (timers.current.cache === undefined) return;
+      clearTimeout(timers.current.cache);
+      timers.current.cache = undefined;
+      if (latest.current !== null) storage.saveCache(latest.current);
+    };
+
+    const scheduleCache = () => {
+      clearTimeout(timers.current.cache);
+      timers.current.cache = setTimeout(flushCache, CACHE_DELAY_MS);
+    };
+
+    /** Runs the write once every earlier one has ended, so that no two overlap. */
+    const inTurn = <T,>(write: () => Promise<T>): Promise<T> => {
+      const run = writes.current.last.then(write);
+      writes.current.last = run.catch(() => undefined);
+      return run;
+    };
+
+    const autoSave = () => {
+      if (writes.current.waiting) return; // that one will write the latest data too
+      writes.current.waiting = true;
+      void inTurn(async () => {
+        writes.current.waiting = false;
+        const current = latest.current; // the latest, whatever file it was meant for
+        if (current === null) return;
+        if (!storage.canAutoSave()) {
+          syncFile({ dirty: true }); // a write was due, and it cannot be made
+          return;
+        }
+        const fileNo = writes.current.fileNo;
+        try {
+          await storage.autoSave(current);
+        } catch {
+          // The data stays. The adapter no longer saves by itself, so the user's next save is
+          // what puts it back on, and until then the status says that the file is behind.
+          if (fileNo === writes.current.fileNo) syncFile({ dirty: true }); // not a file left behind
+        }
+      });
+    };
+
+    const scheduleAutoSave = () => {
+      clearTimeout(timers.current.file);
+      timers.current.file = setTimeout(autoSave, FILE_DELAY_MS);
+    };
+
+    /** The data changed, other than by opening a file. */
+    const changed = () => {
+      scheduleCache();
+      if (storage.canAutoSave()) scheduleAutoSave();
+      else setFile((f) => (f.dirty && !f.auto ? f : { ...f, dirty: true, auto: false }));
+    };
+
+    const dispatch = (action: Action) => {
+      const before = latest.current;
+      let after: AppData;
+      if (action.type === 'load') after = action.data;
+      else if (before === null) return; // nothing to change yet
+      else after = reduce(before, action);
+      if (after === before) return;
+      latest.current = after;
+      setData(after);
+      changed();
+    };
+
+    const fail = (e: unknown, fallback: string) => {
+      syncFile();
+      const message = messageFor(e, fallback);
+      if (message !== null) setError(message);
+    };
+
+    const openFile = async () => {
+      let opened: AppData | null;
+      try {
+        opened = await storage.openFile();
+      } catch (e) {
+        fail(e, FILE_ERRORS.open);
+        return;
+      }
+      if (opened === null) {
+        syncFile();
+        return;
+      }
+      // The adapter has switched to the new file, so from here on only its data may go there.
+      writes.current.fileNo++;
+      clearTimeout(timers.current.file);
+      latest.current = opened;
+      setData(opened);
+      scheduleCache();
+      setFile({
+        name: storage.fileName(),
+        savedAt: new Date().toISOString(),
+        dirty: false,
+        auto: storage.canAutoSave(),
+      });
+      setError(null);
+    };
+
+    const saveFile = async () => {
+      if (latest.current === null) return;
+      let saved: AppData;
+      try {
+        saved = await inTurn(async () => {
+          const current = latest.current as AppData; // the latest when this write begins
+          await storage.saveFile(current);
+          return current;
+        });
+      } catch (e) {
+        fail(e, FILE_ERRORS.save);
+        return;
+      }
+      const auto = storage.canAutoSave();
+      // The file has what was saved, not what came in during the write.
+      const behind = latest.current !== saved;
+      setFile({
+        name: storage.fileName(),
+        savedAt: new Date().toISOString(),
+        dirty: behind && !auto,
+        auto,
+      });
+      setError(null);
+      if (behind && auto) scheduleAutoSave(); // the file can take it now
+    };
+
+    const newData = () => {
+      setError(null);
+      dispatch({ type: 'load', data: newAppData() });
+    };
+
+    const dismissError = () => setError(null);
+
+    return { dispatch, openFile, saveFile, newData, dismissError, flushCache };
+  }, [storage]);
+
+  // A page that goes away cannot wait for the timers: its last change goes to the cache now.
+  useEffect(() => {
+    window.addEventListener('pagehide', actions.flushCache);
+    return () => {
+      window.removeEventListener('pagehide', actions.flushCache);
+      actions.flushCache();
+      clearTimeout(timers.current.file);
+    };
+  }, [actions]);
+
+  const store = useMemo<AppStore>(
+    () => ({
+      data,
+      dispatch: actions.dispatch,
+      file,
+      openFile: actions.openFile,
+      saveFile: actions.saveFile,
+      newData: actions.newData,
+      error,
+      dismissError: actions.dismissError,
+      runner,
+    }),
+    [data, file, error, actions, runner],
+  );
+
+  return <AppContext value={store}>{children}</AppContext>;
+}

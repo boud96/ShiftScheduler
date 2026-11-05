@@ -1,0 +1,439 @@
+import { describe, expect, it } from 'vitest';
+import { Code } from '../domain/codes';
+import { buildMonthGrid } from '../domain/context';
+import type { MonthGrid } from '../domain/context';
+import { newAppData, newPerson } from '../domain/defaults';
+import type { AppData, ISODate, PersonId, StoredCell } from '../domain/types';
+import { reduce } from './reducer';
+import type { Action } from './reducer';
+
+/** Freezes the data all the way down, so that a reducer that edits its input throws. */
+function deepFreeze<T>(value: T): T {
+  if (typeof value === 'object' && value !== null && !ArrayBuffer.isView(value)) {
+    Object.values(value).forEach(deepFreeze);
+    Object.freeze(value);
+  }
+  return value;
+}
+
+type Put = [date: ISODate, personId: PersonId, cell: StoredCell];
+
+/** A frozen plan of eight people, p1 to p8, with these cells stored. */
+function plan(...cells: Put[]): AppData {
+  const data = newAppData();
+  for (const [date, id, cell] of cells) (data.cells[date] ??= {})[id] = cell;
+  return deepFreeze(data);
+}
+
+const cellOf = (data: AppData, date: ISODate, id: PersonId): StoredCell | undefined =>
+  data.cells[date]?.[id];
+
+describe('load', () => {
+  it('replaces the data', () => {
+    const loaded = newAppData();
+    loaded.people[0].name = 'Jiný plán';
+    expect(reduce(plan(), { type: 'load', data: loaded })).toBe(loaded);
+  });
+});
+
+describe('setCell', () => {
+  it('stores a cell and keeps the others of that day', () => {
+    const data = plan(['2027-01-04', 'p2', { code: 'R2' }]);
+    const next = reduce(data, {
+      type: 'setCell',
+      date: '2027-01-04',
+      personId: 'p1',
+      cell: { code: 'R1', pinned: true },
+    });
+    expect(cellOf(next, '2027-01-04', 'p1')).toEqual({ code: 'R1', pinned: true });
+    expect(cellOf(next, '2027-01-04', 'p2')).toEqual({ code: 'R2' });
+  });
+
+  it('replaces whatever the cell held', () => {
+    const data = plan(['2027-01-04', 'p1', { code: 'R1', pinned: true }]);
+    const next = reduce(data, {
+      type: 'setCell',
+      date: '2027-01-04',
+      personId: 'p1',
+      cell: { code: 'DOV' },
+    });
+    expect(cellOf(next, '2027-01-04', 'p1')).toStrictEqual({ code: 'DOV' });
+  });
+
+  it('removes the cell for null, and the day with it when it was the last cell', () => {
+    const data = plan(
+      ['2027-01-04', 'p1', { code: 'R1' }],
+      ['2027-01-05', 'p1', { code: 'R1' }],
+      ['2027-01-05', 'p2', { code: 'R2' }],
+    );
+    const set = (date: ISODate, personId: PersonId) =>
+      ({ type: 'setCell', date, personId, cell: null }) as const;
+    const first = reduce(data, set('2027-01-04', 'p1'));
+    expect(first.cells).not.toHaveProperty('2027-01-04');
+    const second = reduce(data, set('2027-01-05', 'p1'));
+    expect(Object.keys(second.cells['2027-01-05'])).toEqual(['p2']);
+  });
+
+  it('gives back the same data when there is no cell to remove', () => {
+    const data = plan(['2027-01-04', 'p1', { code: 'R1' }]);
+    const clear = (date: ISODate, personId: PersonId) =>
+      reduce(data, { type: 'setCell', date, personId, cell: null });
+    expect(clear('2027-01-04', 'p2')).toBe(data);
+    expect(clear('2027-01-06', 'p1')).toBe(data);
+  });
+});
+
+describe('togglePin', () => {
+  const toggle = (data: AppData) =>
+    reduce(data, { type: 'togglePin', date: '2027-01-04', personId: 'p1' });
+
+  it('pins a shift that is not pinned', () => {
+    const next = toggle(plan(['2027-01-04', 'p1', { code: 'R1' }]));
+    expect(cellOf(next, '2027-01-04', 'p1')).toStrictEqual({ code: 'R1', pinned: true });
+  });
+
+  it('unpins a pinned shift, leaving no pinned key', () => {
+    const next = toggle(plan(['2027-01-04', 'p1', { code: 'R1', pinned: true }]));
+    expect(cellOf(next, '2027-01-04', 'p1')).toStrictEqual({ code: 'R1' });
+  });
+
+  it('toggles each of the seven shifts', () => {
+    for (const code of ['R1', 'R2', 'O20', 'O', 'N', 'R12', 'N12'] as const) {
+      const pinned = toggle(plan(['2027-01-04', 'p1', { code }]));
+      expect(cellOf(pinned, '2027-01-04', 'p1')).toStrictEqual({ code, pinned: true });
+    }
+  });
+
+  it('ignores a cell holding x', () => {
+    const data = plan(['2027-01-04', 'p1', { code: 'x' }]);
+    expect(toggle(data)).toBe(data);
+  });
+
+  it('ignores each absence', () => {
+    for (const code of ['DOV', 'MD', 'OP', 'NEM'] as const) {
+      const data = plan(['2027-01-04', 'p1', { code }]);
+      expect(toggle(data)).toBe(data);
+    }
+  });
+
+  it('ignores a day on which the person has no cell', () => {
+    const data = plan(['2027-01-04', 'p2', { code: 'R1' }]);
+    expect(toggle(data)).toBe(data);
+  });
+});
+
+describe('applyPaste', () => {
+  it('stores the cells of the plan: shifts pinned, x and absences plain', () => {
+    const next = reduce(plan(), {
+      type: 'applyPaste',
+      plan: {
+        writes: [
+          { personId: 'p1', date: '2027-01-04', code: 'R1' },
+          { personId: 'p2', date: '2027-01-04', code: 'x' },
+        ],
+        ignored: [],
+        namesColumn: false,
+      },
+    });
+    expect(cellOf(next, '2027-01-04', 'p1')).toStrictEqual({ code: 'R1', pinned: true });
+    expect(cellOf(next, '2027-01-04', 'p2')).toStrictEqual({ code: 'x' });
+  });
+});
+
+describe('applyGenerated', () => {
+  const MONTH = '2027-01';
+  const GENERATED_AT = '2027-01-02T09:30:00.000Z';
+
+  /** Where a date sits in a row of the month grid. */
+  const column = (grid: MonthGrid, date: ISODate) =>
+    grid.ctx.days.findIndex((day) => day.date === date);
+
+  /** The rows of the grid with these cells set to a code number. */
+  function generated(grid: MonthGrid, ...sets: Array<[PersonId, ISODate, number]>): Uint8Array[] {
+    const rows = grid.rows.map((row) => row.slice());
+    for (const [id, date, code] of sets) {
+      rows[grid.personIds.indexOf(id)][column(grid, date)] = code;
+    }
+    return rows;
+  }
+
+  /** What `useGenerator` dispatches when a run ends: the rows of a grid captured at its start. */
+  function apply(data: AppData, grid: MonthGrid, rows: Uint8Array[]): AppData {
+    const action: Action = {
+      type: 'applyGenerated',
+      month: MONTH,
+      rows,
+      seed: 42,
+      personIds: grid.personIds,
+      generatedAt: GENERATED_AT,
+    };
+    return reduce(data, action);
+  }
+
+  // A request, an absence, a pin, and the last day of December (which is no part of the month).
+  const start = plan(
+    ['2027-01-01', 'p1', { code: 'x' }],
+    ['2027-01-04', 'p2', { code: 'DOV' }],
+    ['2027-01-05', 'p3', { code: 'R2', pinned: true }],
+    ['2026-12-31', 'p4', { code: 'N' }],
+    ['2027-02-02', 'p1', { code: 'R1' }],
+  );
+
+  it('stores the rows, sets the status draft, and keeps the fixed cells', () => {
+    const grid = buildMonthGrid(start, MONTH);
+    const rows = generated(
+      grid,
+      ['p1', '2027-01-04', Code.R1],
+      ['p5', '2027-01-09', Code.R12],
+      // The generator never changes these, but the reducer must not rely on that.
+      ['p1', '2027-01-01', Code.R12],
+      ['p2', '2027-01-04', Code.R1],
+      ['p3', '2027-01-05', Code.O],
+      ['p4', '2026-12-31', Code.R1],
+    );
+    const next = apply(start, grid, rows);
+
+    expect(cellOf(next, '2027-01-04', 'p1')).toStrictEqual({ code: 'R1' });
+    expect(cellOf(next, '2027-01-09', 'p5')).toStrictEqual({ code: 'R12' });
+    expect(cellOf(next, '2027-01-01', 'p1')).toStrictEqual({ code: 'x' });
+    expect(cellOf(next, '2027-01-04', 'p2')).toStrictEqual({ code: 'DOV' });
+    expect(cellOf(next, '2027-01-05', 'p3')).toStrictEqual({ code: 'R2', pinned: true });
+    expect(cellOf(next, '2026-12-31', 'p4')).toStrictEqual({ code: 'N' });
+    expect(cellOf(next, '2027-02-02', 'p1')).toStrictEqual({ code: 'R1' });
+    expect(next.months[MONTH]).toStrictEqual({
+      status: 'draft',
+      seed: 42,
+      generatedAt: GENERATED_AT,
+    });
+  });
+
+  it('clears a free cell that the generated month leaves empty', () => {
+    const data = plan(['2027-01-12', 'p6', { code: 'O' }]);
+    const grid = buildMonthGrid(data, MONTH);
+    const next = apply(data, grid, generated(grid, ['p6', '2027-01-12', Code.EMPTY]));
+    expect(next.cells).not.toHaveProperty('2027-01-12');
+  });
+
+  it('merges into the month, keeping its hours adjustment, and leaves other months alone', () => {
+    const data = structuredClone(start);
+    data.months[MONTH] = { status: 'closed', hoursAdjust: { p1: 2 } };
+    data.months['2026-12'] = { status: 'closed', seed: 7 };
+    const grid = buildMonthGrid(data, MONTH);
+    const next = apply(data, grid, grid.rows);
+    expect(next.months[MONTH]).toStrictEqual({
+      status: 'draft',
+      seed: 42,
+      generatedAt: GENERATED_AT,
+      hoursAdjust: { p1: 2 },
+    });
+    expect(next.months['2026-12']).toStrictEqual({ status: 'closed', seed: 7 });
+  });
+
+  it('keeps an edit made while the generator ran', () => {
+    const grid = buildMonthGrid(start, MONTH);
+    const rows = generated(
+      grid,
+      ['p6', '2027-01-12', Code.R1],
+      ['p6', '2027-01-13', Code.R1],
+      ['p6', '2027-01-14', Code.R1],
+    );
+    // Meanwhile the team lead pins one cell, asks for x on another and fills a third.
+    let edited = reduce(start, {
+      type: 'setCell',
+      date: '2027-01-12',
+      personId: 'p6',
+      cell: { code: 'O', pinned: true },
+    });
+    edited = reduce(edited, {
+      type: 'setCell',
+      date: '2027-01-13',
+      personId: 'p6',
+      cell: { code: 'x' },
+    });
+    edited = reduce(edited, {
+      type: 'setCell',
+      date: '2027-01-14',
+      personId: 'p6',
+      cell: { code: 'MD' },
+    });
+    const next = apply(edited, grid, rows);
+    expect(cellOf(next, '2027-01-12', 'p6')).toStrictEqual({ code: 'O', pinned: true });
+    expect(cellOf(next, '2027-01-13', 'p6')).toStrictEqual({ code: 'x' });
+    expect(cellOf(next, '2027-01-14', 'p6')).toStrictEqual({ code: 'MD' });
+  });
+
+  it('gives each row to its person by id, however the team changed meanwhile', () => {
+    const grid = buildMonthGrid(start, MONTH);
+    const rows = generated(
+      grid,
+      ['p1', '2027-01-06', Code.R1],
+      ['p3', '2027-01-07', Code.R2],
+      ['p6', '2027-01-08', Code.O],
+      ['p7', '2027-01-11', Code.O20],
+      ['p8', '2027-01-12', Code.N],
+    );
+    // Meanwhile p1 is removed, p7 moves up a place and a new person joins.
+    let edited = reduce(start, { type: 'removePerson', personId: 'p1' });
+    edited = reduce(edited, { type: 'movePerson', personId: 'p7', delta: -1 });
+    edited = reduce(edited, { type: 'addPerson', id: 'p9' });
+    const next = apply(edited, grid, rows);
+
+    expect(cellOf(next, '2027-01-06', 'p1')).toBeUndefined();
+    expect(cellOf(next, '2027-01-07', 'p3')).toStrictEqual({ code: 'R2' });
+    expect(cellOf(next, '2027-01-08', 'p6')).toStrictEqual({ code: 'O' });
+    expect(cellOf(next, '2027-01-11', 'p7')).toStrictEqual({ code: 'O20' });
+    expect(cellOf(next, '2027-01-12', 'p8')).toStrictEqual({ code: 'N' });
+    expect(Object.values(next.cells).some((day) => 'p9' in day)).toBe(false);
+  });
+
+  it('skips a person who is no longer in the team that month', () => {
+    const grid = buildMonthGrid(start, MONTH);
+    const rows = generated(grid, ['p3', '2027-01-07', Code.R2], ['p4', '2027-01-07', Code.R1]);
+    const p3 = start.people.find((p) => p.id === 'p3')!;
+    const edited = reduce(start, {
+      type: 'updatePerson',
+      person: { ...p3, activeTo: '2026-12-31' },
+    });
+    const next = apply(edited, grid, rows);
+    expect(cellOf(next, '2027-01-07', 'p3')).toBeUndefined();
+    expect(cellOf(next, '2027-01-07', 'p4')).toStrictEqual({ code: 'R1' });
+  });
+});
+
+describe('updatePerson', () => {
+  it('replaces the person with that id and keeps the order', () => {
+    const data = plan();
+    const person = { ...data.people[2], name: 'Nové jméno', allowance: { DOV: 20, MD: 3 } };
+    const next = reduce(data, { type: 'updatePerson', person });
+    expect(next.people[2]).toEqual(person);
+    expect(next.people.map((p) => p.id)).toEqual(data.people.map((p) => p.id));
+    expect(next.people[1]).toBe(data.people[1]);
+  });
+
+  it('does not add a person it does not know', () => {
+    const data = plan();
+    expect(reduce(data, { type: 'updatePerson', person: newPerson('zz', 'Cizí') })).toBe(data);
+  });
+});
+
+describe('addPerson', () => {
+  it('adds a default person at the end, named by the size of the team', () => {
+    const next = reduce(plan(), { type: 'addPerson', id: 'new-id' });
+    expect(next.people).toHaveLength(9);
+    expect(next.people[8]).toEqual(newPerson('new-id', 'Operátor 9'));
+  });
+
+  it('numbers the name from the people there are now', () => {
+    const smaller = reduce(plan(), { type: 'removePerson', personId: 'p2' });
+    const next = reduce(smaller, { type: 'addPerson', id: 'new-id' });
+    expect(next.people[7].name).toBe('Operátor 8');
+  });
+
+  it('gives the same result for the same action, as a pure reducer must', () => {
+    const data = plan();
+    const action: Action = { type: 'addPerson', id: 'new-id' };
+    expect(reduce(data, action)).toEqual(reduce(data, action));
+  });
+
+  it('does not add a second person with an id that is taken', () => {
+    const data = plan();
+    expect(reduce(data, { type: 'addPerson', id: 'p3' })).toBe(data);
+  });
+});
+
+describe('removePerson', () => {
+  const data = (() => {
+    const base = plan(
+      ['2027-01-04', 'p1', { code: 'R1' }],
+      ['2027-01-04', 'p2', { code: 'R2' }],
+      ['2027-01-05', 'p1', { code: 'x' }],
+      ['2026-12-31', 'p1', { code: 'N' }],
+    );
+    const copy = structuredClone(base);
+    copy.months['2027-01'] = { status: 'draft', hoursAdjust: { p1: 3, p2: -1.5 } };
+    copy.months['2026-12'] = { status: 'closed', hoursAdjust: { p1: 1 } };
+    copy.months['2026-11'] = { status: 'closed' };
+    return deepFreeze(copy);
+  })();
+
+  const remove = (personId: PersonId) => reduce(data, { type: 'removePerson', personId });
+
+  it('removes the person from the team', () => {
+    const ids = remove('p1').people.map((p) => p.id);
+    expect(ids).toEqual(['p2', 'p3', 'p4', 'p5', 'p6', 'p7', 'p8']);
+  });
+
+  it('removes their cells, and the days that held nothing else', () => {
+    const next = remove('p1');
+    expect(cellOf(next, '2027-01-04', 'p1')).toBeUndefined();
+    expect(next.cells).not.toHaveProperty('2027-01-05');
+    expect(next.cells).not.toHaveProperty('2026-12-31');
+  });
+
+  it('keeps the cells of the others', () => {
+    expect(cellOf(remove('p1'), '2027-01-04', 'p2')).toStrictEqual({ code: 'R2' });
+  });
+
+  it('removes their hours adjustments and keeps the others', () => {
+    const next = remove('p1');
+    expect(next.months['2027-01']).toStrictEqual({ status: 'draft', hoursAdjust: { p2: -1.5 } });
+    expect(next.months['2026-12']).toStrictEqual({ status: 'closed', hoursAdjust: {} });
+    expect(next.months['2026-11']).toStrictEqual({ status: 'closed' });
+  });
+
+  it('leaves the hours adjustments of the others when a person with none is removed', () => {
+    expect(remove('p5').months['2027-01'].hoursAdjust).toEqual({ p1: 3, p2: -1.5 });
+  });
+
+  it('ignores a person who is not there', () => {
+    expect(remove('zz')).toBe(data);
+  });
+});
+
+describe('movePerson', () => {
+  const ids = (data: AppData) => data.people.map((p) => p.id).join(' ');
+
+  it('moves a person one place down', () => {
+    const next = reduce(plan(), { type: 'movePerson', personId: 'p2', delta: 1 });
+    expect(ids(next)).toBe('p1 p3 p2 p4 p5 p6 p7 p8');
+  });
+
+  it('moves a person one place up', () => {
+    const next = reduce(plan(), { type: 'movePerson', personId: 'p2', delta: -1 });
+    expect(ids(next)).toBe('p2 p1 p3 p4 p5 p6 p7 p8');
+  });
+
+  it('keeps the order at either end of the team', () => {
+    const data = plan();
+    expect(reduce(data, { type: 'movePerson', personId: 'p1', delta: -1 })).toBe(data);
+    expect(reduce(data, { type: 'movePerson', personId: 'p8', delta: 1 })).toBe(data);
+  });
+
+  it('ignores a person it does not know', () => {
+    const data = plan();
+    expect(reduce(data, { type: 'movePerson', personId: 'zz', delta: 1 })).toBe(data);
+  });
+});
+
+describe('updateSettings', () => {
+  it('lays the patch over the settings', () => {
+    const data = plan();
+    const next = reduce(data, {
+      type: 'updateSettings',
+      patch: { minRestHours: 10, generatorTimeBudgetSec: 5 },
+    });
+    expect(next.settings).toEqual({
+      ...data.settings,
+      minRestHours: 10,
+      generatorTimeBudgetSec: 5,
+    });
+  });
+
+  it('replaces a nested setting as a whole', () => {
+    const data = plan();
+    const wishLevels = { ...data.settings.wishLevels, W6: 0 as const };
+    const next = reduce(data, { type: 'updateSettings', patch: { wishLevels } });
+    expect(next.settings.wishLevels).toEqual(wishLevels);
+    expect(next.settings.coverage).toBe(data.settings.coverage);
+  });
+});
