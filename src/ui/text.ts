@@ -108,6 +108,16 @@ export const MONTH_SCREEN = {
   pinned: '📌',
   checks: 'Kontrola',
   summary: (musts: number, wishes: number): string => `Musí: ${musts} · Přání: ${wishes}`,
+  /** The generator's controls in the head: the button, the time spent, and how a run ended. */
+  generate: {
+    start: 'Vygenerovat',
+    stop: 'Zastavit',
+    /** `percent` is the share of the run's time that has gone, 0 to 100. */
+    running: (percent: number): string => `Generuji… ${percent} %`,
+    /** `mustUnits` is how much of the musts the draft still breaks, as the checks count it. */
+    done: (mustUnits: number): string => `Hotovo. Porušená pravidla: ${mustUnits}`,
+    failed: (message: string): string => `Generování se nepodařilo: ${message}`,
+  },
 };
 
 /** An option of a select, and the value that it stands for. */

@@ -660,3 +660,112 @@ describe('the error', () => {
     expect(app.error).toBeNull();
   });
 });
+
+describe('loads, the count of times the data was replaced', () => {
+  it('starts at 0, with cached data and without', () => {
+    mount(memoryStorage(newAppData()));
+    expect(app.loads).toBe(0);
+    mount(memoryStorage(null));
+    expect(app.loads).toBe(0);
+  });
+
+  it('goes up by one for each file that is opened', async () => {
+    const storage = memoryStorage(newAppData());
+    storage.openFile = async () => otherPlan();
+    mount(storage);
+    await act(() => app.openFile());
+    expect(app.loads).toBe(1);
+    await act(() => app.openFile());
+    expect(app.loads).toBe(2);
+  });
+
+  it.each([
+    ['a cancelled picker', async () => null],
+    [
+      'an aborted picker',
+      async () => {
+        throw abortError();
+      },
+    ],
+    [
+      'a file that is no good',
+      async () => {
+        throw new SaveFileError('Soubor je poškozený.');
+      },
+    ],
+  ])('stays where it was after %s', async (_, open) => {
+    const storage = memoryStorage(newAppData());
+    storage.openFile = open;
+    mount(storage);
+    await act(() => app.openFile());
+    expect(app.loads).toBe(0);
+  });
+
+  it('goes up by one for a new plan, and for any other load', () => {
+    mount(memoryStorage(null));
+    act(() => app.newData());
+    expect(app.loads).toBe(1);
+    act(() => app.dispatch({ type: 'load', data: otherPlan() }));
+    expect(app.loads).toBe(2);
+  });
+
+  it('does not move for a change of the data, nor for a load of the data it already holds', async () => {
+    const held = newAppData();
+    mount(memoryStorage(held));
+    await setRest(10);
+    act(() => app.dispatch({ type: 'addPerson', id: 'new-id' }));
+    act(() => app.dispatch({ type: 'load', data: app.data as AppData }));
+    expect(app.loads).toBe(0);
+  });
+
+  it('is not moved by saving to the file', async () => {
+    mount(memoryStorage(newAppData()));
+    await act(() => app.saveFile());
+    expect(app.loads).toBe(0);
+  });
+});
+
+describe('an action stamped with loads', () => {
+  const change = { type: 'updateSettings', patch: { minRestHours: 10 } } as const;
+
+  it('is applied while the data is the one it was meant for', async () => {
+    mount(memoryStorage(newAppData()));
+    act(() => app.dispatch(change, app.loads));
+    expect(rest()).toBe(10);
+  });
+
+  it('is dropped once the data has been replaced, even before the screen has caught up', async () => {
+    const storage = memoryStorage(newAppData());
+    storage.openFile = async () => otherPlan();
+    mount(storage);
+    const meant = app.loads;
+    await act(async () => {
+      await app.openFile();
+      // Still the screen's old render: React has not drawn the new count yet.
+      expect(app.loads).toBe(meant);
+      app.dispatch(change, meant);
+    });
+    expect(app.loads).toBe(meant + 1);
+    expect(rest()).toBe(12);
+    expect(app.data?.people[0].name).toBe('Jiný plán');
+  });
+
+  it('is dropped after a new plan was started, too', () => {
+    mount(memoryStorage(newAppData()));
+    const meant = app.loads;
+    act(() => {
+      app.newData();
+      app.dispatch(change, meant);
+    });
+    expect(rest()).toBe(12);
+  });
+
+  it('is applied when it carries the count of the data now held', async () => {
+    const storage = memoryStorage(newAppData());
+    storage.openFile = async () => otherPlan();
+    mount(storage);
+    await act(() => app.openFile());
+    act(() => app.dispatch(change, app.loads));
+    expect(rest()).toBe(10);
+  });
+});

@@ -4,11 +4,11 @@ import { browserStorage } from './storage/adapter';
 import { App } from './ui/App';
 import { AppProvider } from './ui/store';
 import './ui/styles.css';
-import { inProcessRunner } from './worker/runner';
+import { workerRunner } from './worker/runner';
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
-    <AppProvider storage={browserStorage()} runner={inProcessRunner}>
+    <AppProvider storage={browserStorage()} runner={workerRunner}>
       <App />
     </AppProvider>
   </StrictMode>,

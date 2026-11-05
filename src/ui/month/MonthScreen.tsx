@@ -15,6 +15,8 @@ import { ChecksPanel, checksOf, marksOf } from './ChecksPanel';
 import type { Check } from './ChecksPanel';
 import { Grid } from './Grid';
 import type { CellRef } from './Grid';
+import { useGenerator } from './useGenerator';
+import type { Generator, GeneratorOutcome } from './useGenerator';
 
 /** The month after the one that today is in, by the local date: the one that is still to plan. */
 function defaultMonth(): MonthKey {
@@ -56,6 +58,61 @@ function buildView(data: AppData, month: MonthKey): MonthView {
   };
 }
 
+interface GenerateControlsProps {
+  generator: Generator;
+  /** The month that is shown. */
+  month: MonthKey;
+  /** Whether the month has anybody to plan: with nobody there is nothing to generate. */
+  hasPeople: boolean;
+}
+
+/** The line that tells how a run ended: empty while there is nothing to tell. */
+function outcomeLine(outcome: GeneratorOutcome | null): string {
+  const { generate } = MONTH_SCREEN;
+  if (outcome === null) return '';
+  return outcome.kind === 'done'
+    ? generate.done(outcome.mustUnits)
+    : generate.failed(outcome.message);
+}
+
+/**
+ * The button that starts the generator and what goes with a run: the time spent and the button
+ * that stops it, then how it ended. The run is the screen's, whichever month is shown, but how it
+ * ended is told only with the month it was for.
+ */
+function GenerateControls({ generator, month, hasPeople }: GenerateControlsProps) {
+  const { generate } = MONTH_SCREEN;
+  const told = generator.outcome?.month === month ? generator.outcome : null;
+  return (
+    <div className="month-generate">
+      <button
+        type="button"
+        className="button button-primary"
+        disabled={generator.running || !hasPeople}
+        onClick={() => generator.start(month)}
+      >
+        {generate.start}
+      </button>
+      {generator.running && (
+        <>
+          <span className="month-generate-progress">{generate.running(generator.percent)}</span>
+          <button type="button" className="button" onClick={generator.stop}>
+            {generate.stop}
+          </button>
+        </>
+      )}
+      {/* A live region, so that how a run ended is read out; the progress is left out of it. */}
+      <span
+        className="month-generate-outcome"
+        role="status"
+        data-failed={told?.kind === 'failed' || undefined}
+      >
+        {outcomeLine(told)}
+      </span>
+    </div>
+  );
+}
+
 /** What a pick from the menu stores. A shift is pinned: a manual edit means "keep this". */
 function storedCell(code: CodeInt): StoredCell {
   const name = nameOf(code) as CodeName;
@@ -74,6 +131,7 @@ interface MonthScreenProps {
  */
 export function MonthScreen({ initialMonth }: MonthScreenProps) {
   const { data, dispatch } = useApp();
+  const generator = useGenerator();
   const [month, setMonth] = useState<MonthKey>(() => initialMonth ?? defaultMonth());
   /**
    * The cell that was clicked last, and whether its menu is open. The cell stays selected when the
@@ -143,6 +201,11 @@ export function MonthScreen({ initialMonth }: MonthScreenProps) {
           {MONTH_SCREEN.status[view.status]}
         </span>
         <p className="month-info">{view.info}</p>
+        <GenerateControls
+          generator={generator}
+          month={month}
+          hasPeople={view.grid.rows.length > 0}
+        />
       </div>
       <Grid
         grid={view.grid}

@@ -33,7 +33,18 @@ export interface FileStatus {
 export interface AppStore {
   /** The plan, or null until the user opens a file or starts a new one. */
   data: AppData | null;
-  dispatch(action: Action): void;
+  /**
+   * Applies the action. Given `ifLoads` (the `loads` that the store had when the work that the
+   * action belongs to began), it does so only while the data has not been replaced since: an action
+   * for data that is gone is dropped, so a late result never lands in another file.
+   */
+  dispatch(action: Action, ifLoads?: number): void;
+  /**
+   * How many times the data has been replaced since the page started: by every file that is opened,
+   * every new plan and any other `load`. Work begun on some data that ends later, such as a run of
+   * the generator, reads it at its start and treats a change as "my data is gone". It starts at 0.
+   */
+  loads: number;
   file: FileStatus;
   /** Lets the user pick a save file and replaces the data with it. Never rejects. */
   openFile(): Promise<void>;
@@ -92,9 +103,12 @@ export function AppProvider({ storage, runner, children }: AppProviderProps) {
   const [data, setData] = useState(initial.data);
   const [file, setFile] = useState(initial.file);
   const [error, setError] = useState<string | null>(null);
+  const [loads, setLoads] = useState(0);
 
   // Timers and writes outlive the render that started them, so they read from these.
   const latest = useRef(initial.data);
+  /** The count of replacements as of now, where `loads` is as of the last render. */
+  const replacements = useRef(0);
   const timers = useRef<{ cache?: Timer; file?: Timer }>({});
   const writes = useRef({
     /** Ends when every write so far has. */
@@ -163,7 +177,14 @@ export function AppProvider({ storage, runner, children }: AppProviderProps) {
       else setFile((f) => (f.dirty && !f.auto ? f : { ...f, dirty: true, auto: false }));
     };
 
-    const dispatch = (action: Action) => {
+    /** The data was replaced, by a file that was opened or by a load. */
+    const replaced = () => {
+      replacements.current++;
+      setLoads(replacements.current);
+    };
+
+    const dispatch = (action: Action, ifLoads?: number) => {
+      if (ifLoads !== undefined && ifLoads !== replacements.current) return; // its data is gone
       const before = latest.current;
       let after: AppData;
       if (action.type === 'load') after = action.data;
@@ -172,6 +193,7 @@ export function AppProvider({ storage, runner, children }: AppProviderProps) {
       if (after === before) return;
       latest.current = after;
       setData(after);
+      if (action.type === 'load') replaced();
       changed();
     };
 
@@ -198,6 +220,7 @@ export function AppProvider({ storage, runner, children }: AppProviderProps) {
       clearTimeout(timers.current.file);
       latest.current = opened;
       setData(opened);
+      replaced();
       scheduleCache();
       setFile({
         name: storage.fileName(),
@@ -258,6 +281,7 @@ export function AppProvider({ storage, runner, children }: AppProviderProps) {
     () => ({
       data,
       dispatch: actions.dispatch,
+      loads,
       file,
       openFile: actions.openFile,
       saveFile: actions.saveFile,
@@ -266,7 +290,7 @@ export function AppProvider({ storage, runner, children }: AppProviderProps) {
       dismissError: actions.dismissError,
       runner,
     }),
-    [data, file, error, actions, runner],
+    [data, loads, file, error, actions, runner],
   );
 
   return <AppContext value={store}>{children}</AppContext>;

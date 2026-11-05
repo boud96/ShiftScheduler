@@ -408,6 +408,23 @@ h1 {
   color: var(--muted);
 }
 
+.month-generate {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  margin-left: auto;
+}
+
+.month-generate-progress,
+.month-generate-outcome {
+  color: var(--muted);
+}
+
+.month-generate-outcome[data-failed] {
+  color: var(--danger-text);
+}
+
 /* The grid: a box that scrolls, with the names kept at the left and the totals at the right. */
 
 .month-grid-scroll {
