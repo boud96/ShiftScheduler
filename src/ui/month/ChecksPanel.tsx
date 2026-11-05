@@ -31,15 +31,19 @@ export interface Marks {
 export const cellId = (person: number, day: number): string => `${person}:${day}`;
 
 /**
- * The text of the line of a finding. A finding about a person has their name, and the date of the
- * first of its days that lies in the month (a tail day is not shown as the date). A finding about
- * the whole team is its message alone.
+ * The text of the line of a finding: the date of the first of its days that lies in the month (a
+ * tail day is not shown as the date), then the message. A finding about a person has their name
+ * before the date, and one about the whole team has no name. A finding with no day in the month
+ * has no date: its line is the name and the message, or for the whole team the message alone.
  */
 function lineOf(finding: Finding, ctx: MonthContext, names: readonly string[]): string {
-  if (finding.person === null) return finding.message;
   const day = finding.days.find((d) => d >= ctx.first);
-  const date = day === undefined ? '' : ` · ${shortDate(ctx.days[day].date)}`;
-  return `${names[finding.person]}${date}: ${finding.message}`;
+  const date = day === undefined ? null : shortDate(ctx.days[day].date);
+  if (finding.person === null) {
+    return date === null ? finding.message : `${date}: ${finding.message}`;
+  }
+  const name = names[finding.person];
+  return date === null ? `${name}: ${finding.message}` : `${name} · ${date}: ${finding.message}`;
 }
 
 /**

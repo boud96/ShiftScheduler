@@ -948,11 +948,36 @@ describe('Kontrola', () => {
     expect(checks().getByText('Operátor B: 0 h z 157,5 h: chybí 157,5 h do FPD')).toBeVisible();
   });
 
-  it('reads the message alone for a finding about the team, with no name and no date', () => {
+  it('reads the date and the message for a finding about the team, with no name', () => {
+    const data = calm();
+    data.settings.coverage.R1 = { min: 1, max: 1 }; // R1 is asked on every weekday: no one has it
+    renderMonth(data);
+    // The gaps of different days read differently: each line has the day of its gap.
+    const weekdays = [4, 5, 6, 7, 8, 11, 12, 13, 14, 15, 18, 19, 20, 21, 22, 25, 26, 27, 28, 29];
+    expect(lines()).toEqual(weekdays.map((day) => `${day}. 1.: chybí R1`));
+    expect(checks().getByText('4. 1.: chybí R1')).toBeVisible();
+    expect(checks().getByText('5. 1.: chybí R1')).toBeVisible();
+  });
+
+  it('tells the gaps of a month with nothing in it apart by their days', () => {
     renderMonth(plan(2));
-    const found = lines().filter((line) => /^chybí R1$/.test(line ?? ''));
-    expect(found).toHaveLength(20); // one for each weekday of January
-    expect(checks().getAllByText('chybí R12')).toHaveLength(11); // and for each 12-hour day
+    const gaps = lines().filter((line) => /: chybí R1$/.test(line ?? ''));
+    expect(gaps).toHaveLength(20); // one for each weekday of January
+    expect(new Set(gaps).size).toBe(20); // and no two read alike
+    const twelve = lines().filter((line) => /: chybí R12$/.test(line ?? ''));
+    expect(twelve).toHaveLength(11); // and one for each 12-hour day
+    expect(new Set(twelve).size).toBe(11);
+  });
+
+  it('keeps the message alone for a finding about the team that names no day', () => {
+    // O20 is disliked by A, D and F (W8): A works it twice and they do not. No person, no day.
+    const data = calm();
+    data.settings.wishLevels.W8 = 3;
+    put(data, MONDAY, 'A', 'O20');
+    put(data, '2027-01-05', 'A', 'O20');
+    renderMonth(data);
+    expect(lines()).toEqual(['O20 rozdělené nerovnoměrně mezi ty, kdo ji nemají rádi']);
+    expect(checks().getByText('Musí: 0 · Přání: 1')).toBeInTheDocument();
   });
 
   it('hides a finding that only explains the score, and does not count it', () => {
@@ -983,7 +1008,7 @@ describe('Kontrola', () => {
     data.settings.coverage.R1 = { min: 0, max: 1 };
     for (const person of ['A', 'B', 'C']) put(data, MONDAY, person, 'R1');
     renderMonth(data);
-    expect(lines()).toEqual(['R1 3×']); // two too many
+    expect(lines()).toEqual(['4. 1.: R1 3×']); // two too many, on the 4th
     expect(checks().getByText('Musí: 1 · Přání: 0')).toBeInTheDocument();
   });
 
@@ -1023,6 +1048,33 @@ describe('the checks of a month', () => {
     const later = checksOf([other, finding], ctx(), names); // in another order
     expect(first.map((check) => check.key).sort()).toEqual(later.map((check) => check.key).sort());
     expect(first[0].key).not.toBe(first[1].key);
+  });
+
+  /** The text of the line of a finding that is `patch` laid over the one above. */
+  const textOf = (patch: Partial<Finding>) =>
+    checksOf([{ ...finding, ...patch }], ctx(), names)[0].text;
+
+  it('date a finding about the team by the first day of the month that it names', () => {
+    // The days are indices in `ctx.days`: 0 to 6 are 25 to 31 December, 7 is 1 January.
+    const team = { person: null, rule: 'M1', severity: 'must', message: 'chybí R1' } as const;
+    expect(textOf({ ...team, days: [10] })).toBe('4. 1.: chybí R1');
+    expect(textOf({ ...team, days: [9, 10] })).toBe('3. 1.: chybí R1');
+    expect(textOf({ ...team, days: [3, 9] })).toBe('3. 1.: chybí R1'); // not the tail day, 28 Dec
+    expect(textOf({ ...team, days: [7] })).toBe('1. 1.: chybí R1');
+  });
+
+  it('keep the message alone for a finding about the team with no day in the month', () => {
+    const team = { person: null, message: 'rozdělené nerovnoměrně' } as const;
+    expect(textOf({ ...team, days: [] })).toBe('rozdělené nerovnoměrně');
+    expect(textOf({ ...team, days: [2, 6] })).toBe('rozdělené nerovnoměrně'); // 27 and 31 Dec
+  });
+
+  it('leave the line of a finding about a person as it was: name, date, message', () => {
+    expect(textOf({ days: [9, 10] })).toBe('Operátor A · 3. 1.: přesčas 1 h');
+    expect(textOf({ days: [3, 9] })).toBe('Operátor A · 3. 1.: přesčas 1 h');
+    expect(textOf({ days: [] })).toBe('Operátor A: přesčas 1 h');
+    expect(textOf({ days: [3, 6] })).toBe('Operátor A: přesčas 1 h'); // the tail only
+    expect(textOf({ person: 1, days: [10] })).toBe('Operátor B · 4. 1.: přesčas 1 h');
   });
 
   it('leave out the quiet findings and put the musts first', () => {
@@ -1152,7 +1204,7 @@ describe('selecting a line of Kontrola', () => {
     renderMonth(data);
     const coverage = screen.getByTestId('coverage-2027-01-04');
     expect(coverage).not.toHaveClass('flagged');
-    await userEvent.click(checks().getByText('R1 2×'));
+    await userEvent.click(checks().getByText('4. 1.: R1 2×'));
     expect(coverage).toHaveClass('flagged');
     expect(screen.getByTestId('coverage-2027-01-05')).not.toHaveClass('flagged');
     expect(cell('A', MONDAY)).not.toHaveClass('flagged');
