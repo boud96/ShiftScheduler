@@ -15,7 +15,7 @@ import { BELOW_FPD, HARD } from './weights';
 
 const MINUTES_PER_DAY = 1440;
 /** A shortfall this small (in hours) is rounding noise in the sum of the hours, not a shortfall. */
-const FPD_TOLERANCE = 1e-9;
+export const FPD_TOLERANCE = 1e-9;
 
 /** Hands a finding of a must to the sink. Call it only when there is a sink. */
 function report(
