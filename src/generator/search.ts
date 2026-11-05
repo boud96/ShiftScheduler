@@ -10,16 +10,27 @@ export interface SearchOptions {
    * `maxIterations` give the same result.
    */
   seed: number;
-  /** The most iterations (one move tried each) to run, over all the segments together. */
+  /**
+   * The most iterations (one move tried each) to run, over all the segments together. Without a
+   * time budget it sets the length of every segment. With one it is only a safety cap: give it
+   * well above what the budget allows, or the search stops before its segments have cooled.
+   */
   maxIterations: number;
   /**
    * The time the search may take, in milliseconds. With it the segments are timed: each gets its
-   * share of the time and cools by the clock. Without it they are counted in iterations.
+   * share of the time and cools by the clock, and `maxIterations` only caps the run. Without it
+   * they are counted in iterations.
    */
   timeBudgetMs?: number;
-  /** How many segments the search is split into (default 4); see `search`. */
+  /**
+   * How many segments the search is split into (default 4); see `search`. A value that is not a
+   * whole number of at least 1 once rounded down (0, NaN, Infinity) gives the default.
+   */
   restarts?: number;
-  /** Iterations between two progress reports (default 2000). */
+  /**
+   * Iterations between two progress reports (default 2000). A value that is not a whole number of
+   * at least 1 once rounded down (0, NaN, Infinity) gives the default.
+   */
   progressEvery?: number;
   /** Asked after each progress report: true stops the search, keeping the best month so far. */
   shouldStop?: () => boolean;
@@ -68,6 +79,15 @@ function temperature(fraction: number): number {
   return START_TEMPERATURE * Math.pow(END_TEMPERATURE / START_TEMPERATURE, fraction);
 }
 
+/**
+ * `value` rounded down, or `fallback` if that is not a finite number of at least 1. A count of
+ * NaN or Infinity would otherwise make a loop that never yields, or one that never ends.
+ */
+function wholeCount(value: number | undefined, fallback: number): number {
+  const count = Math.floor(value ?? fallback);
+  return Number.isFinite(count) && count >= 1 ? count : fallback;
+}
+
 /** Lets other work run first, such as a worker taking in a message to stop. */
 function pause(): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, 0));
@@ -104,8 +124,8 @@ export async function search(
   onProgress?: (progress: SearchProgress) => void,
 ): Promise<SearchResult> {
   const started = performance.now();
-  const restarts = Math.max(1, Math.floor(opts.restarts ?? RESTARTS));
-  const progressEvery = Math.max(1, Math.floor(opts.progressEvery ?? PROGRESS_EVERY));
+  const restarts = wholeCount(opts.restarts, RESTARTS);
+  const progressEvery = wholeCount(opts.progressEvery, PROGRESS_EVERY);
   // Infinity is cut to a number the segments can be counted with; NaN counts as none.
   const iterations =
     Math.min(Math.max(Math.floor(opts.maxIterations), 0), Number.MAX_SAFE_INTEGER) || 0;

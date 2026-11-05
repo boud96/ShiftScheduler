@@ -10,6 +10,9 @@ import { GAP, HARD } from './weights';
  * weekday, R12 and N12 on a 12-hour day. A missing person scores GAP, an extra one HARD. Everyone
  * in `rows` counts, in the team that day or not: M3 is what reports a shift outside it.
  *
+ * The result depends only on how many people hold each code that day, never on who: `SearchState`
+ * relies on that when it skips evaluating the days again after a swap move.
+ *
  * Without a `sink` this creates nothing but its result: no findings, no text.
  */
 export function evaluateDay(

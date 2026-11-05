@@ -220,7 +220,7 @@ describe('generator limits', () => {
     // an infinite time budget is none: the segments are counted in iterations all the same
     for (const timeBudgetMs of [undefined, Infinity]) {
       const temperatures: number[] = [];
-      const opts = { seed: 1, maxIterations: 8000, progressEvery: 500, timeBudgetMs };
+      const opts = { seed: 1, maxIterations: 8000, restarts: 4, progressEvery: 500, timeBudgetMs };
       await search(g.ctx, g.rows, g.fixed, opts, (p) => {
         temperatures.push(p.temperature);
       });
@@ -235,7 +235,15 @@ describe('generator limits', () => {
   it('with a time budget, cools every segment in its share of the time', async () => {
     const g = jan();
     const temperatures: number[] = [];
-    const opts = { seed: 1, maxIterations: 1e9, timeBudgetMs: 400, progressEvery: 10 };
+    // 4 segments of 300 ms: enough reports in each for the checks below, on a busy machine too
+    const budget = 1200;
+    const opts = {
+      seed: 1,
+      maxIterations: 1e9,
+      timeBudgetMs: budget,
+      restarts: 4,
+      progressEvery: 10,
+    };
     const begin = performance.now();
     const r = await search(g.ctx, g.rows, g.fixed, opts, (p) => {
       temperatures.push(p.temperature);
@@ -257,9 +265,29 @@ describe('generator limits', () => {
       segment.slice(1).forEach((t, k) => expect(t).toBeLessThan(segment[k]));
     }
     // It ends when the budget is spent, not after its billion iterations.
-    expect(took).toBeGreaterThanOrEqual(400);
-    expect(took).toBeLessThan(400 + 1500);
+    expect(took).toBeGreaterThanOrEqual(budget);
+    expect(took).toBeLessThan(budget + 4000);
     expect(r.iterations).toBeLessThan(1e9);
+  }, 20_000);
+
+  it('takes the default for restarts and progressEvery below 1, NaN or Infinity', async () => {
+    const g = jan();
+    const run = async (restarts?: number, progressEvery?: number) => {
+      let reports = 0;
+      const opts = { seed: 1, maxIterations: 5000, restarts, progressEvery };
+      const r = await search(g.ctx, g.rows, g.fixed, opts, () => {
+        reports++;
+      });
+      return { rows: r.rows, iterations: r.iterations, reports };
+    };
+    // the defaults: a report after 2000 and after 4000 iterations
+    const plain = await run();
+    expect(plain.reports).toBe(2);
+    // Infinity segments would each get no iteration, in a loop that never ends; a progressEvery of
+    // NaN or Infinity would never report, nor stop when asked to
+    for (const odd of [NaN, Infinity, -Infinity, 0, 0.5, -3]) {
+      expect(await run(odd, odd)).toEqual(plain);
+    }
   });
 
   it('with a time budget, still stops after maxIterations', async () => {
