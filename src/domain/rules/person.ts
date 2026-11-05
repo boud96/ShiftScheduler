@@ -3,7 +3,9 @@ import type { MonthContext } from '../context';
 import type { ShiftName } from '../types';
 import { personMusts } from './personMusts';
 import { personWishes } from './personWishes';
+import { preferenceWishes } from './preferenceWishes';
 import type { PersonStats, Sink } from './types';
+import { weekendWishes } from './weekendWishes';
 
 /**
  * Counts the month days of `row` into `stats`. The previous month's tail is not counted. A shift
@@ -64,6 +66,10 @@ export function evaluatePerson(
     mustUnits: 0,
   };
   countMonth(ctx, row, stats);
-  const score = personMusts(ctx, p, row, stats, sink) + personWishes(ctx, p, row, stats, sink);
+  const score =
+    personMusts(ctx, p, row, stats, sink) +
+    personWishes(ctx, p, row, stats, sink) +
+    weekendWishes(ctx, p, row, stats, sink) +
+    preferenceWishes(ctx, p, row, stats, sink);
   return { score, stats };
 }

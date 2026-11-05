@@ -29,8 +29,8 @@ function report(
   sink({ rule, severity: 'must', person, days, message, penalty });
 }
 
-/** The 12-hour shifts of the month, for the cells M5 points at. */
-function twelveDays(ctx: MonthContext, row: Uint8Array): number[] {
+/** The 12-hour shifts of the month, for the cells M5 (and W5a) point at. */
+export function twelveDays(ctx: MonthContext, row: Uint8Array): number[] {
   const found: number[] = [];
   for (let i = ctx.first; i < ctx.days.length; i++) {
     if (isTwelveShift(row[i])) found.push(i);

@@ -24,9 +24,10 @@ const NIGHT_RUN = 5;
 
 /**
  * Hands a finding of a wish to the sink. Call it only when there is a sink. A `quiet` finding is
- * marked as such; any other has no `quiet` field at all.
+ * marked as such; any other has no `quiet` field at all. The wishes of the other files in this
+ * folder report through it too.
  */
-function report(
+export function report(
   sink: Sink,
   rule: WishId,
   person: number,
@@ -50,7 +51,7 @@ function span(from: number, to: number): number[] {
 }
 
 /** The indices from `from` to `to` that hold `code`. */
-function cellsWith(row: Uint8Array, from: number, to: number, code: number): number[] {
+export function cellsWith(row: Uint8Array, from: number, to: number, code: number): number[] {
   const found: number[] = [];
   for (let i = from; i <= to; i++) if (row[i] === code) found.push(i);
   return found;
@@ -368,6 +369,8 @@ function willingness(
  * began there counts its days there. A finding is scored and reported only if its last day is a day
  * of the month: what lies wholly in the previous month was judged with that month. "The last day of
  * the month" is the last index of `ctx.days`; a row is as long.
+ *
+ * Wishes W5 and W6 are in `weekendWishes.ts` and `preferenceWishes.ts`.
  *
  * Without a `sink` no array, string or closure is created: every one in this file sits inside an
  * `if (sink !== undefined ...)`. A wish whose penalty is 0 (switched off) is not reported. Every
