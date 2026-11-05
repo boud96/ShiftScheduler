@@ -5,13 +5,13 @@ import { cellsWith, report } from './personWishes';
 import type { PersonStats, Sink } from './types';
 
 /** The weekday shifts, in the order of `PersonStats.perShift`. */
-const SHIFTS: readonly WeekdayShift[] = ['R1', 'R2', 'O20', 'O', 'N'];
+export const SHIFTS: readonly WeekdayShift[] = ['R1', 'R2', 'O20', 'O', 'N'];
 /** W6: the units of one shift by its rating, indexed by the rating (there is no rating 0). */
 const RATING_UNITS: readonly number[] = [0, 6, 4, 2, 1, 0];
 /** W6: a shift the person has not rated counts as this rating. */
 const UNRATED: Rating = 3;
-/** W6: a shift rated this low or lower is one the person dislikes. */
-const DISLIKED: Rating = 2;
+/** W6 and W8: a shift rated this low or lower is one the person dislikes. */
+export const DISLIKED: Rating = 2;
 
 /** Whether the person has rated at least one of the weekday shifts. */
 function hasRatings(ratings: Preferences['ratings']): boolean {

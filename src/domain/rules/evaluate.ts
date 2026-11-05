@@ -1,5 +1,6 @@
 import type { MonthContext } from '../context';
 import { evaluateDay } from './day';
+import { evaluateGlobal } from './global';
 import { evaluatePerson } from './person';
 import type { DayStats, Finding, PersonStats, Sink } from './types';
 
@@ -55,9 +56,8 @@ export function evaluateMonth(ctx: MonthContext, rows: Uint8Array[], explain = f
     score += result.score;
     mustUnits += result.stats.mustUnits;
   }
-  // Task 7 replaces this with evaluateGlobal(ctx, persons, days, sink).
-  const globalScore = 0;
+  score += evaluateGlobal(ctx, persons, days, sink);
 
   findings.sort(mustsFirstThenByDay);
-  return { score: score + globalScore, mustUnits, findings, persons, days };
+  return { score, mustUnits, findings, persons, days };
 }

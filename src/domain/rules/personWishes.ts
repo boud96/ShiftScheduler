@@ -25,12 +25,12 @@ const NIGHT_RUN = 5;
 /**
  * Hands a finding of a wish to the sink. Call it only when there is a sink. A `quiet` finding is
  * marked as such; any other has no `quiet` field at all. The wishes of the other files in this
- * folder report through it too.
+ * folder report through it too; `person` is null for a finding about the whole team.
  */
 export function report(
   sink: Sink,
   rule: WishId,
-  person: number,
+  person: number | null,
   days: number[],
   message: string,
   penalty: number,
