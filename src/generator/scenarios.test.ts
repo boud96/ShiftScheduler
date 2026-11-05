@@ -10,9 +10,45 @@ import { scenario } from '../test/scenarios';
 import type { ScenarioName } from '../test/scenarios';
 import { search } from './search';
 
-/** Counted in iterations, with no time budget: a scenario and a seed always give the same month. */
+/**
+ * Counted in iterations, with no time budget: a scenario and a seed always give the same month.
+ *
+ * 300,000 iterations are too few for the search to settle, so each run is a draw. Over seeds 1-24
+ * the committed search passes these checks on jan2027 21/24 (39/48 over 1-48), feb2027 22/24,
+ * dec2027 23/24, impossible 22/24, and mar2027, jul2027 and pins 24/24. So after a change to the
+ * rules, the weights, construct or the moves, a red run may be seed noise. Before changing a seed
+ * or an assertion, compare the pass rates over many seeds before and after the change, and keep
+ * the change only if no scenario's rate drops. Never weaken an assertion to make a seed pass.
+ *
+ * SCENARIO_SEEDS (such as `1-24` or `1,5,7-9`) replaces the seeds of every scenario. A sweep, one
+ * process per scenario:
+ *
+ *   d=$(mktemp -d)
+ *   for s in jan2027 feb2027 mar2027 dec2027 jul2027 impossible pins; do
+ *     SCENARIO_SEEDS=1-24 npx vitest run src/generator/scenarios.test.ts -t $s > $d/$s.txt &
+ *   done; wait; grep 'Tests ' $d/*.txt
+ */
 const ITERATIONS = 300_000;
 const TIMEOUT = 120_000;
+
+/** The seeds that SCENARIO_SEEDS lists, or null if it is not set. */
+function sweepSeeds(text: string | undefined): number[] | null {
+  if (text === undefined || text.trim() === '') return null;
+  const seeds: number[] = [];
+  for (const part of text.split(',')) {
+    const range = /^\s*(\d+)\s*(?:-\s*(\d+)\s*)?$/.exec(part);
+    if (range === null) throw new Error(`SCENARIO_SEEDS: "${part}" is not a seed or a range`);
+    const to = Number(range[2] ?? range[1]);
+    for (let seed = Number(range[1]); seed <= to; seed++) seeds.push(seed);
+  }
+  if (seeds.length === 0) throw new Error(`SCENARIO_SEEDS: "${text}" lists no seed`);
+  return seeds;
+}
+
+const SWEEP = sweepSeeds(process.env.SCENARIO_SEEDS);
+
+/** The seeds a scenario runs on: the plan's, unless SCENARIO_SEEDS gives others. */
+const seeds = (planned: number[]): number[] => SWEEP ?? planned;
 
 interface Generated {
   g: MonthGrid;
@@ -21,7 +57,7 @@ interface Generated {
 }
 
 /** Generates the month of a scenario, and evaluates it with every finding listed. */
-async function generate(name: ScenarioName, seed = 1): Promise<Generated> {
+async function generate(name: ScenarioName, seed: number): Promise<Generated> {
   const { data, month } = scenario(name);
   const g = buildMonthGrid(data, month);
   const r = await search(g.ctx, g.rows, g.fixed, { seed, maxIterations: ITERATIONS });
@@ -74,7 +110,7 @@ describe('generator scenarios', () => {
     }
   });
 
-  it.each([1, 2, 3])(
+  it.each(seeds([1, 2, 3]))(
     'jan2027, seed %i: no must broken, two or three 12-hour shifts each, the least overtime, ' +
       'whole weekends and night runs',
     async (seed) => {
@@ -102,10 +138,10 @@ describe('generator scenarios', () => {
     TIMEOUT,
   );
 
-  it(
-    'feb2027: no must broken, two 12-hour shifts each and 0.5 h over FPD',
-    async () => {
-      const { g, ev } = await generate('feb2027');
+  it.each(seeds([1]))(
+    'feb2027, seed %i: no must broken, two 12-hour shifts each and 0.5 h over FPD',
+    async (seed) => {
+      const { g, ev } = await generate('feb2027', seed);
       expect(ev.mustUnits, musts(g, ev)).toBe(0);
       ev.persons.forEach((p, k) => {
         expect(p.twelve, `${g.personIds[k]}'s 12-hour shifts`).toBe(2);
@@ -115,10 +151,10 @@ describe('generator scenarios', () => {
     TIMEOUT,
   );
 
-  it(
-    'mar2027 (Easter): no must broken, two or three 12-hour shifts each',
-    async () => {
-      const { g, ev } = await generate('mar2027');
+  it.each(seeds([1]))(
+    'mar2027 (Easter), seed %i: no must broken, two or three 12-hour shifts each',
+    async (seed) => {
+      const { g, ev } = await generate('mar2027', seed);
       expect(ev.mustUnits, musts(g, ev)).toBe(0);
       // 20 twelve-hour shifts (Good Friday, Easter Monday and 4 weekends)
       expect(twelveCounts(ev)).toEqual([2, 2, 2, 2, 3, 3, 3, 3]);
@@ -126,10 +162,10 @@ describe('generator scenarios', () => {
     TIMEOUT,
   );
 
-  it(
-    'dec2027: no must broken, and no shift on 24 to 26 December for A and G, ahead in festive days',
-    async () => {
-      const { g, rows, ev } = await generate('dec2027');
+  it.each(seeds([1]))(
+    'dec2027, seed %i: no must broken, and A and G, ahead in festive days, off on 24 to 26 Dec',
+    async (seed) => {
+      const { g, rows, ev } = await generate('dec2027', seed);
       expect(ev.mustUnits, musts(g, ev)).toBe(0);
       // 31 December is a working weekday, which A and G may need for their FPD: not asserted
       for (const id of ['A', 'G']) {
@@ -142,19 +178,19 @@ describe('generator scenarios', () => {
     TIMEOUT,
   );
 
-  it(
-    'jul2027 (heavy leave): no must broken',
-    async () => {
-      const { g, ev } = await generate('jul2027');
+  it.each(seeds([1]))(
+    'jul2027 (heavy leave), seed %i: no must broken',
+    async (seed) => {
+      const { g, ev } = await generate('jul2027', seed);
       expect(ev.mustUnits, musts(g, ev)).toBe(0);
     },
     TIMEOUT,
   );
 
-  it(
-    'impossible: leaves only the 2 shifts no one can take uncovered, and bends no limit',
-    async () => {
-      const { g, ev } = await generate('impossible');
+  it.each(seeds([1]))(
+    'impossible, seed %i: leaves only the 2 shifts no one can take uncovered, and bends no limit',
+    async (seed) => {
+      const { g, ev } = await generate('impossible', seed);
       const bent = ['M2', 'M3', 'M4', 'M5', 'M7', 'M8'];
       expect(ev.findings.filter((f) => bent.includes(f.rule))).toEqual([]);
 
@@ -169,10 +205,10 @@ describe('generator scenarios', () => {
     TIMEOUT,
   );
 
-  it(
-    'pins: no must broken, and D keeps the nights pinned from 11 to 15 January',
-    async () => {
-      const { g, rows, ev } = await generate('pins');
+  it.each(seeds([1]))(
+    'pins, seed %i: no must broken, and D keeps the nights pinned from 11 to 15 January',
+    async (seed) => {
+      const { g, rows, ev } = await generate('pins', seed);
       expect(ev.mustUnits, musts(g, ev)).toBe(0);
       const row = rowOf(g, rows, 'D');
       const pinned = ['11', '12', '13', '14', '15'].map((day) => row[dayOf(g, `2027-01-${day}`)]);
