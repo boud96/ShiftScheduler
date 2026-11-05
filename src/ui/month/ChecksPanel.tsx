@@ -30,20 +30,28 @@ export interface Marks {
 /** The name of a cell: `person` is an index in the grid's rows, `day` one in `ctx.days`. */
 export const cellId = (person: number, day: number): string => `${person}:${day}`;
 
+/** The dates of the days of the finding that lie in the month, as `D. M.`, in day order. */
+function datesOf(finding: Finding, ctx: MonthContext): string[] {
+  return finding.days
+    .filter((day) => day >= ctx.first) // a day of the previous month is not shown as a date
+    .sort((a, b) => a - b)
+    .map((day) => shortDate(ctx.days[day].date));
+}
+
 /**
- * The text of the line of a finding: the date of the first of its days that lies in the month (a
- * tail day is not shown as the date), then the message. A finding about a person has their name
- * before the date, and one about the whole team has no name. A finding with no day in the month
- * has no date: its line is the name and the message, or for the whole team the message alone.
+ * The text of the line of a finding. The dates come from its days, and only from there. A finding
+ * about a person is `name · first date: message`. One about the whole team is
+ * `every date: message`, the dates joined with commas. A finding with no day in the month has no
+ * date: its line is the name and the message, or for the whole team the message alone.
  */
 function lineOf(finding: Finding, ctx: MonthContext, names: readonly string[]): string {
-  const day = finding.days.find((d) => d >= ctx.first);
-  const date = day === undefined ? null : shortDate(ctx.days[day].date);
+  const dates = datesOf(finding, ctx);
   if (finding.person === null) {
-    return date === null ? finding.message : `${date}: ${finding.message}`;
+    return dates.length === 0 ? finding.message : `${dates.join(', ')}: ${finding.message}`;
   }
   const name = names[finding.person];
-  return date === null ? `${name}: ${finding.message}` : `${name} · ${date}: ${finding.message}`;
+  if (dates.length === 0) return `${name}: ${finding.message}`;
+  return `${name} · ${dates[0]}: ${finding.message}`;
 }
 
 /**

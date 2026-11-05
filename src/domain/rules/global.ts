@@ -1,5 +1,4 @@
 import type { MonthContext } from '../context';
-import { shortDate } from '../format';
 import type { FairnessCounts, Preferences, Rating, WeekdayShift } from '../types';
 import { report } from './personWishes';
 import { DISLIKED, SHIFTS } from './preferenceWishes';
@@ -147,7 +146,9 @@ function unloved(ctx: MonthContext, persons: PersonStats[], sink?: Sink): number
 
 /**
  * W9's finding. It is shown if some weekday is `FAR_FROM_MEAN` or more from the `mean` of R2, and
- * lists those days; if none is, the penalty is a sum of smaller distances and the finding is quiet.
+ * names those days in `days`: the message has no dates, since whoever shows the finding writes
+ * them from its days. If none is that far, the penalty is a sum of smaller distances and the
+ * finding is quiet.
  */
 function reportR2(
   ctx: MonthContext,
@@ -157,17 +158,15 @@ function reportR2(
   sink: Sink,
 ): void {
   const far: number[] = [];
-  const dates: string[] = [];
   for (let i = 0; i < days.length; i++) {
     const day = ctx.days[ctx.first + i];
     if (day.dayType !== 'weekday' || Math.abs(days[i].r2 - mean) < FAR_FROM_MEAN) continue;
     far.push(ctx.first + i);
-    dates.push(shortDate(day.date));
   }
   if (far.length === 0) {
     report(sink, 'W9', null, far, 'počet R2 se mezi všedními dny liší', penalty, true);
   } else {
-    report(sink, 'W9', null, far, `nevyrovnaný počet R2: ${dates.join(', ')}`, penalty);
+    report(sink, 'W9', null, far, 'nevyrovnaný počet R2', penalty);
   }
 }
 

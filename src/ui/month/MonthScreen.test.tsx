@@ -892,6 +892,14 @@ function oneMustOneWish(): AppData {
   return data;
 }
 
+/** Three people on R2 on each of `dates`: days far from the mean of R2, a wish of the team (W9). */
+function crowdedR2(...dates: ISODate[]): AppData {
+  const data = calm();
+  data.settings.wishLevels.W9 = 3;
+  for (const date of dates) for (const person of ['A', 'B', 'C']) put(data, date, person, 'R2');
+  return data;
+}
+
 const M2_LINE = 'Operátor C · 1. 1.: R12 hned po O: jen 8 h odpočinku (min. 12 h)';
 const W7_LINE = 'Operátor A: víc dvanáctihodinových směn než ostatní';
 
@@ -980,6 +988,22 @@ describe('Kontrola', () => {
     expect(checks().getByText('Musí: 0 · Přání: 1')).toBeInTheDocument();
   });
 
+  it('reads the date once for a wish about the team that names a day', () => {
+    renderMonth(crowdedR2(MONDAY));
+    expect(lines()).toEqual(['4. 1.: nevyrovnaný počet R2']);
+    expect(checks().getByText('Musí: 0 · Přání: 1')).toBeInTheDocument();
+  });
+
+  it('lists the dates of every day that a wish about the team names, in day order', () => {
+    renderMonth(crowdedR2('2027-01-11', MONDAY));
+    expect(lines()).toEqual(['4. 1., 11. 1.: nevyrovnaný počet R2']);
+  });
+
+  it('writes the month of a date as a number, however many digits', () => {
+    renderMonth(crowdedR2('2027-10-04'), '2027-10');
+    expect(lines()).toEqual(['4. 10.: nevyrovnaný počet R2']);
+  });
+
   it('hides a finding that only explains the score, and does not count it', () => {
     const data = calm();
     data.settings.wishLevels.W7 = 3;
@@ -1054,13 +1078,25 @@ describe('the checks of a month', () => {
   const textOf = (patch: Partial<Finding>) =>
     checksOf([{ ...finding, ...patch }], ctx(), names)[0].text;
 
-  it('date a finding about the team by the first day of the month that it names', () => {
+  it('date a finding about the team by every day of the month that it names', () => {
     // The days are indices in `ctx.days`: 0 to 6 are 25 to 31 December, 7 is 1 January.
     const team = { person: null, rule: 'M1', severity: 'must', message: 'chybí R1' } as const;
     expect(textOf({ ...team, days: [10] })).toBe('4. 1.: chybí R1');
-    expect(textOf({ ...team, days: [9, 10] })).toBe('3. 1.: chybí R1');
-    expect(textOf({ ...team, days: [3, 9] })).toBe('3. 1.: chybí R1'); // not the tail day, 28 Dec
     expect(textOf({ ...team, days: [7] })).toBe('1. 1.: chybí R1');
+    expect(textOf({ ...team, days: [9, 10] })).toBe('3. 1., 4. 1.: chybí R1');
+    expect(textOf({ ...team, days: [3, 9] })).toBe('3. 1.: chybí R1'); // the tail day is no date
+    expect(textOf({ ...team, days: [2, 3, 8, 14, 20] })).toBe('2. 1., 8. 1., 14. 1.: chybí R1');
+  });
+
+  it('put the dates of a finding about the team in day order, and leave its days alone', () => {
+    const days = [14, 9, 10];
+    const [check] = checksOf(
+      [{ ...finding, person: null, message: 'nevyrovnaný počet R2', days }],
+      ctx(),
+      names,
+    );
+    expect(check.text).toBe('3. 1., 4. 1., 8. 1.: nevyrovnaný počet R2');
+    expect(days).toEqual([14, 9, 10]); // the finding is not changed
   });
 
   it('keep the message alone for a finding about the team with no day in the month', () => {
@@ -1208,6 +1244,15 @@ describe('selecting a line of Kontrola', () => {
     expect(coverage).toHaveClass('flagged');
     expect(screen.getByTestId('coverage-2027-01-05')).not.toHaveClass('flagged');
     expect(cell('A', MONDAY)).not.toHaveClass('flagged');
+  });
+
+  it('marks each day that a line about the team names, in the coverage row', async () => {
+    renderMonth(crowdedR2(MONDAY, '2027-01-11'));
+    await userEvent.click(line('4. 1., 11. 1.: nevyrovnaný počet R2'));
+    for (const date of [MONDAY, '2027-01-11']) {
+      expect(screen.getByTestId(`coverage-${date}`)).toHaveClass('flagged');
+    }
+    expect(screen.getByTestId('coverage-2027-01-05')).not.toHaveClass('flagged');
   });
 
   it('is cleared when the month changes', async () => {

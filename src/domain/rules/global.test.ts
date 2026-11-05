@@ -288,7 +288,7 @@ describe('W9 in detail', () => {
       ...[24, 25, 26, 27, 28],
     ]);
   });
-  it('shows a day far from the mean, with the day and its date', () => {
+  it('shows a day far from the mean, and names the day', () => {
     // 3 people on R2 on Mon 4 Jan and nobody on the 19 other weekdays: the mean is 0.15, and the
     // squares of the distances add up to 9 - 20 x 0.15^2 = 8.55
     const [finding, ...others] = found(jan, 'W9', everyone({ 3: 'R2' }));
@@ -299,36 +299,38 @@ describe('W9 in detail', () => {
       severity: 'wish',
       person: null,
       days: [jan.first + 3],
-      message: 'nevyrovnaný počet R2: 4. 1.',
+      message: 'nevyrovnaný počet R2',
     });
     expect(penalty / jan.weights.W9).toBeCloseTo(8.55, 12);
   });
-  it('lists every day that far, in order, as "D. M." joined with commas', () => {
+  it('names every day that far, in order, and leaves the dates to the page', () => {
     const [finding] = found(jan, 'W9', everyone({ 3: 'R2', 10: 'R2' }));
-    expect(finding.message).toBe('nevyrovnaný počet R2: 4. 1., 11. 1.');
+    expect(finding.message).toBe('nevyrovnaný počet R2');
     expect(finding.days).toEqual([jan.first + 3, jan.first + 10]);
     expect(finding.penalty / jan.weights.W9).toBeCloseTo(16.2, 12); // 9 + 9 - 20 x 0.3^2
   });
-  it('lists only the days at least 2 away from the mean', () => {
+  it('names only the days at least 2 away from the mean', () => {
     // r2 is 3 on Mon 4 Jan and 2 on Mon 11 Jan: the mean is 0.25, so they are 2.75 and 1.75 away
     const strips = [at({ 3: 'R2', 10: 'R2' }), at({ 3: 'R2', 10: 'R2' }), at({ 3: 'R2' })];
     const [finding] = found(jan, 'W9', strips);
-    expect(finding.message).toBe('nevyrovnaný počet R2: 4. 1.');
+    expect(finding.message).toBe('nevyrovnaný počet R2');
     expect(finding.days).toEqual([jan.first + 3]);
     expect(finding.penalty / jan.weights.W9).toBeCloseTo(11.75, 12);
   });
-  it('lists a day far below the mean as well', () => {
+  it('names a day far below the mean as well', () => {
     // everyone on R2 on every weekday but Mon 4 Jan: the mean is 2.85, and 0 is 2.85 away from it
     const busy = r2EveryWeekday(jan, [3]);
     const [finding] = found(jan, 'W9', [busy, busy, busy]);
-    expect(finding.message).toBe('nevyrovnaný počet R2: 4. 1.');
+    expect(finding.message).toBe('nevyrovnaný počet R2');
     expect(finding.days).toEqual([jan.first + 3]);
     expect(finding.penalty / jan.weights.W9).toBeCloseTo(8.55, 12);
   });
-  it('writes the month as a number, however many digits', () => {
+  it('has the same message in any month: the dates are written from the days', () => {
     // Mon 4 Oct 2027 is day 3 as well
     const oct = ctxFor('2027-10', 3);
-    expect(found(oct, 'W9', everyone({ 3: 'R2' }))[0].message).toBe('nevyrovnaný počet R2: 4. 10.');
+    const [finding] = found(oct, 'W9', everyone({ 3: 'R2' }));
+    expect(finding.message).toBe('nevyrovnaný počet R2');
+    expect(finding.days).toEqual([oct.first + 3]);
   });
   it('keeps the finding quiet when no day is 2 away, and names no day', () => {
     // one person on R2 on the five days of one week: r2 is 1 on 5 days, the mean is 0.25, and the
@@ -437,7 +439,7 @@ describe('the global wishes W7 to W9 together', () => {
     expect(rules(ev, 'W8').every((f) => f.quiet === undefined)).toBe(true);
     const w9 = rules(ev, 'W9');
     expect(w9.map((f) => [f.message, f.quiet])).toEqual([
-      ['nevyrovnaný počet R2: 7. 1.', undefined],
+      ['nevyrovnaný počet R2', undefined],
     ]);
     expect(ev.findings.every((f) => f.message !== '')).toBe(true);
   });
@@ -696,13 +698,9 @@ describe('the global wishes on rows of any kind', () => {
           expect(f.message).toBe('počet R2 se mezi všedními dny liší');
           fired.w9Quiet++;
         } else {
-          const dates = far.map((i) => {
-            const date = ctx.days[ctx.first + i].date;
-            return `${Number(date.slice(8))}. ${Number(date.slice(5, 7))}.`;
-          });
           expect(f.quiet).toBeUndefined();
           expect(f.days).toEqual(far.map((i) => ctx.first + i));
-          expect(f.message).toBe(`nevyrovnaný počet R2: ${dates.join(', ')}`);
+          expect(f.message).toBe('nevyrovnaný počet R2');
           fired.w9Shown++;
         }
       }
