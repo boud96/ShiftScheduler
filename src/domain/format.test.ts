@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { fmtH, days, twelveShifts } from './format';
+import { fmtH, days, shortDate, twelveShifts } from './format';
 
 describe('fmtH', () => {
   it('prints whole hours without a decimal part', () => {
@@ -45,5 +45,16 @@ describe('twelveShifts', () => {
     expect(twelveShifts(11)).toBe('11 dvanáctihodinových směn');
     expect(twelveShifts(21)).toBe('21 dvanáctihodinových směn');
     expect(twelveShifts(22)).toBe('22 dvanáctihodinových směn');
+  });
+});
+
+describe('shortDate', () => {
+  it('gives the Czech day and month of a date, without zeros: D. M.', () => {
+    expect(shortDate('2027-01-04')).toBe('4. 1.');
+    expect(shortDate('2027-12-31')).toBe('31. 12.');
+    expect(shortDate('2026-10-09')).toBe('9. 10.');
+  });
+  it('does not depend on the year', () => {
+    expect(shortDate('2028-02-29')).toBe('29. 2.');
   });
 });

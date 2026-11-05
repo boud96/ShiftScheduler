@@ -12,6 +12,7 @@ import { inProcessRunner } from '../worker/runner';
 import { newAppData } from '../domain/defaults';
 import type { AppData } from '../domain/types';
 import { SaveFileError } from '../storage/saveFile';
+import { TAB_PANEL_SOON } from './text';
 
 afterEach(() => {
   vi.restoreAllMocks(); // the spies
@@ -53,10 +54,20 @@ function Counter() {
 const panelOf = (tab: HTMLElement): HTMLElement =>
   document.getElementById(tab.getAttribute('aria-controls') ?? '') as HTMLElement;
 
+/**
+ * What a tab shows in these tests, unless a test puts in a screen: a placeholder. They are about
+ * the shell, so they do not walk the month grid or the cards, which would make them slow.
+ */
+function Stub() {
+  return <p>{TAB_PANEL_SOON}</p>;
+}
+
+const STUBS = { month: Stub, team: Stub, rules: Stub };
+
 function renderApp(storage: StorageAdapter, screens?: ComponentProps<typeof App>['screens']) {
   return render(
     <AppProvider storage={storage} runner={inProcessRunner}>
-      <App screens={screens} />
+      <App screens={{ ...STUBS, ...screens }} />
       <EditButton />
     </AppProvider>,
   );
@@ -195,13 +206,14 @@ describe('the shell', () => {
 
   it('has a panel for each tab, labelled by it, all of them in the page', () => {
     renderApp(memoryStorage(newAppData()));
+    expect(screen.getAllByText('Připravuje se…')).toHaveLength(3);
     expect(screen.getAllByRole('tabpanel', { hidden: true })).toHaveLength(3);
     for (const name of ['Měsíc', 'Tým', 'Pravidla']) {
       const tab = screen.getByRole('tab', { name });
       const panel = panelOf(tab);
       expect(panel).toHaveAttribute('role', 'tabpanel');
       expect(panel).toHaveAttribute('aria-labelledby', tab.id);
-      expect(panel).not.toBeEmptyDOMElement(); // the screen of the tab, or a placeholder
+      expect(panel).toHaveTextContent('Připravuje se…');
     }
   });
 

@@ -1,4 +1,5 @@
 import type { MonthContext } from '../context';
+import { shortDate } from '../format';
 import type { FairnessCounts, Preferences, Rating, WeekdayShift } from '../types';
 import { report } from './personWishes';
 import { DISLIKED, SHIFTS } from './preferenceWishes';
@@ -142,11 +143,6 @@ function unloved(ctx: MonthContext, persons: PersonStats[], sink?: Sink): number
     }
   }
   return score;
-}
-
-/** A date `YYYY-MM-DD` as the Czech `D. M.`: `2027-01-04` gives `4. 1.`. */
-function shortDate(date: string): string {
-  return `${Number(date.slice(8, 10))}. ${Number(date.slice(5, 7))}.`;
 }
 
 /**

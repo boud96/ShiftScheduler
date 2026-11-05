@@ -349,3 +349,377 @@ h1 {
   gap: 6px;
   align-items: center;
 }
+
+/* Month screen */
+
+.month-screen {
+  --must: #c62828;
+  --wish: #e8a317;
+  --grid-line: #e3e7ec;
+  --weekend: #eceff2;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.month-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 16px;
+}
+
+.month-nav {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.month-nav h2 {
+  min-width: 11ch;
+  margin: 0;
+  font-size: 1.25rem;
+  text-align: center;
+}
+
+.month-status {
+  padding: 2px 12px;
+  font-size: 0.85rem;
+  border-radius: 999px;
+}
+
+.month-status[data-state='requests'] {
+  color: var(--muted);
+  background: var(--grid-line);
+}
+
+.month-status[data-state='draft'] {
+  color: var(--warn-text);
+  background: var(--warn-bg);
+}
+
+.month-status[data-state='closed'] {
+  color: var(--ok-text);
+  background: var(--ok-bg);
+}
+
+.month-info {
+  margin: 0;
+  color: var(--muted);
+}
+
+/* The grid: a box that scrolls, with the names kept at the left and the totals at the right. */
+
+.month-grid-scroll {
+  overflow: auto;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+
+.month-grid {
+  font-size: 0.8rem;
+  border-collapse: separate;
+  border-spacing: 0;
+}
+
+.month-grid th,
+.month-grid td {
+  padding: 0;
+  font-weight: normal;
+  border-right: 1px solid var(--grid-line);
+  border-bottom: 1px solid var(--grid-line);
+}
+
+.month-grid thead th {
+  padding: 3px 0;
+  font-size: 0.75rem;
+  line-height: 1.2;
+  color: var(--muted);
+  text-align: center;
+  background: var(--surface);
+}
+
+.month-weekday,
+.month-daynum {
+  display: block;
+}
+
+.month-daynum {
+  font-weight: 600;
+  color: var(--text);
+}
+
+.month-grid .month-person {
+  position: sticky;
+  left: 0;
+  z-index: 2;
+  min-width: 124px;
+  padding: 0 10px;
+  font-weight: 600;
+  text-align: left;
+  white-space: nowrap;
+  background: var(--surface);
+}
+
+.month-grid .month-totals {
+  position: sticky;
+  right: 0;
+  z-index: 2;
+  padding: 0 10px;
+  white-space: nowrap;
+  background: var(--surface);
+  border-left: 1px solid var(--line);
+}
+
+.month-totals-grid {
+  display: grid;
+  grid-template-columns: 13ch 7ch 4ch 5ch;
+  gap: 1px 8px;
+  line-height: 1.2;
+  text-align: right;
+}
+
+.month-grid thead .month-totals-grid {
+  font-size: 0.75rem;
+  color: var(--muted);
+}
+
+.month-totals-shifts {
+  grid-column: 1 / -1;
+  font-size: 0.65rem;
+  color: var(--muted);
+  text-align: left;
+}
+
+/* A cell, and an item of the menu of a cell: plain here, coloured by the code further down. */
+
+.month-cell {
+  position: relative;
+  display: block;
+  width: 100%;
+  min-width: 34px;
+  height: 30px;
+  padding: 0;
+  font: inherit;
+  font-weight: 600;
+  line-height: 28px;
+  color: inherit;
+  background: transparent;
+  border: 1px solid transparent;
+  cursor: pointer;
+}
+
+.month-menu [role='menuitem'] {
+  padding: 4px 10px;
+  font: inherit;
+  font-weight: 600;
+  color: var(--text);
+  text-align: left;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.month-cell:hover,
+.month-menu [role='menuitem']:hover {
+  filter: brightness(0.93);
+}
+
+.month-cell:focus-visible,
+.month-cell.selected {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+.month-menu [role='menuitem']:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.month-pin {
+  position: absolute;
+  top: 0;
+  right: 1px;
+  font-size: 9px;
+  line-height: 1;
+}
+
+/* The weekends and the holidays are grey columns, the previous month's days are faded. */
+
+.month-grid th.twelve,
+.month-grid .month-coverage td.twelve,
+.month-cell.twelve {
+  background: var(--weekend);
+}
+
+.month-grid th.tail,
+.month-grid .month-coverage td.tail,
+.month-cell.tail {
+  opacity: 0.55;
+}
+
+/* The colours of the codes, as in the team lead's Excel. They colour a cell and a menu item. */
+
+.month-screen [data-code='R1'] {
+  background: #fff2a8;
+}
+
+.month-screen [data-code='R2'] {
+  background: #a6ecf2;
+}
+
+.month-screen [data-code='O20'] {
+  background: #fff;
+  border-color: #8a94a0;
+}
+
+.month-screen [data-code='O'] {
+  background: #fcd5b4;
+}
+
+.month-screen [data-code='N'] {
+  background: #33b5f0;
+}
+
+.month-screen [data-code='N12'] {
+  color: #fff;
+  background: #1f78c8;
+}
+
+.month-screen [data-code='R12'] {
+  background: #f9c6f0;
+}
+
+.month-screen [data-code='DOV'],
+.month-screen [data-code='MD'],
+.month-screen [data-code='OP'],
+.month-screen [data-code='NEM'] {
+  background: #c6efce;
+}
+
+.month-screen [data-code='x'] {
+  font-style: italic;
+  color: #6b7280;
+}
+
+/* A day on which the person is not in the team: greyed, but still open to a click. */
+.month-cell.inactive {
+  color: #8b95a1;
+  background: repeating-linear-gradient(135deg, #f4f5f7 0 4px, #e6e9ed 4px 8px);
+}
+
+/* The outlines: red for a cell that a broken must points at, amber for the selected finding. */
+.month-grid .must {
+  box-shadow: inset 0 0 0 2px var(--must);
+}
+
+.month-grid .flagged {
+  box-shadow: inset 0 0 0 3px var(--wish);
+}
+
+.month-grid .must.flagged {
+  box-shadow:
+    inset 0 0 0 2px var(--must),
+    inset 0 0 0 4px var(--wish);
+}
+
+/* A cell that is flagged is not faded, so that what is wrong in the tail is seen. */
+.month-cell.tail.must,
+.month-cell.tail.flagged {
+  opacity: 1;
+}
+
+.month-coverage th {
+  padding-top: 4px;
+  vertical-align: top;
+}
+
+.month-coverage td {
+  min-width: 34px;
+  padding: 2px 1px;
+  font-size: 0.62rem;
+  line-height: 1.15;
+  color: var(--ok-text);
+  text-align: center;
+  vertical-align: top;
+}
+
+.month-coverage td.short {
+  color: var(--danger-text);
+  background: var(--danger-bg);
+}
+
+/* The menu of a cell sits in the window beside the cell: the box of the grid cannot cut it. */
+.month-menu {
+  position: fixed;
+  z-index: 20;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 120px;
+  max-height: calc(100vh - 16px);
+  padding: 4px;
+  overflow: auto;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgb(0 0 0 / 22%);
+}
+
+.month-menu-separator {
+  height: 1px;
+  margin: 2px 0;
+  background: var(--line);
+}
+
+/* Kontrola */
+
+.month-checks h3 {
+  margin: 0 0 4px;
+  font-size: 1.05rem;
+}
+
+.month-checks-summary {
+  margin: 0 0 8px;
+  color: var(--muted);
+}
+
+.month-checks-list {
+  max-height: 340px;
+  padding: 0;
+  margin: 0;
+  overflow: auto;
+  list-style: none;
+}
+
+.month-check {
+  display: block;
+  width: 100%;
+  padding: 3px 10px;
+  font: inherit;
+  text-align: left;
+  background: transparent;
+  border: 0;
+  border-left: 4px solid;
+  cursor: pointer;
+}
+
+.month-check:hover {
+  background: var(--bg);
+}
+
+.month-check[data-severity='must'] {
+  color: var(--danger-text);
+  border-left-color: var(--must);
+}
+
+.month-check[data-severity='wish'] {
+  color: var(--warn-text);
+  border-left-color: var(--wish);
+}
+
+.month-check[aria-pressed='true'] {
+  font-weight: 600;
+  background: var(--warn-bg);
+}

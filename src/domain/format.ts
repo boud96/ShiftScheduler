@@ -23,3 +23,8 @@ export function twelveShifts(n: number): string {
         : 'dvanáctihodinových směn';
   return `${n} ${form}`;
 }
+
+/** A date `YYYY-MM-DD` as the Czech `D. M.`: `2027-01-04` gives `4. 1.`. */
+export function shortDate(date: string): string {
+  return `${Number(date.slice(8, 10))}. ${Number(date.slice(5, 7))}.`;
+}

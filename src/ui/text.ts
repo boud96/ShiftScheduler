@@ -90,6 +90,26 @@ export const TEAM_SCREEN = {
   },
 };
 
+/** The Month screen: the head, the grid, the menu of a cell and the list of checks. */
+export const MONTH_SCREEN = {
+  /** The tooltips of ◀ and ▶: the buttons themselves show the arrows only. */
+  previous: 'Předchozí měsíc',
+  next: 'Další měsíc',
+  /** What the month is: `requests` while it holds nothing but requests, then a draft or closed. */
+  status: { requests: 'Žádosti', draft: 'Návrh', closed: 'Uzavřeno' },
+  /** `fpd` is the month's hours, formatted; the days are those of the month as a whole. */
+  info: (fpd: string, workdays: number, twelveDays: number): string =>
+    `FPD ${fpd} h · ${workdays} pracovních dní · ${twelveDays} dnů s 12h směnami`,
+  coverage: 'Obsazeno',
+  covered: '✓',
+  /** The columns of the totals of a person. */
+  totals: { hours: 'Hodiny / FPD', overtime: 'Přesčas', twelve: '12h', nights: 'Noci' },
+  menu: { clear: 'Vymazat', pin: 'Připnout', unpin: 'Odepnout' },
+  pinned: '📌',
+  checks: 'Kontrola',
+  summary: (musts: number, wishes: number): string => `Musí: ${musts} · Přání: ${wishes}`,
+};
+
 /** An option of a select, and the value that it stands for. */
 export interface Choice<T> {
   value: T;
