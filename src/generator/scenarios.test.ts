@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { Code, isAbsence, isNight, isShift } from '../domain/codes';
-import { buildMonthGrid } from '../domain/context';
+import { applyRows, buildMonthGrid } from '../domain/context';
 import type { MonthGrid } from '../domain/context';
 import { evaluateMonth } from '../domain/rules/evaluate';
 import type { MonthEval } from '../domain/rules/evaluate';
@@ -15,16 +15,17 @@ import { search } from './search';
  *
  * 300,000 iterations are too few for the search to settle, so each run is a draw. Over seeds 1-24
  * the committed search passes these checks on jan2027 21/24 (39/48 over 1-48), feb2027 22/24,
- * dec2027 23/24, impossible 22/24, and mar2027, jul2027 and pins 24/24. So after a change to the
- * rules, the weights, construct or the moves, a red run may be seed noise. Before changing a seed
- * or an assertion, compare the pass rates over many seeds before and after the change, and keep
- * the change only if no scenario's rate drops. Never weaken an assertion to make a seed pass.
+ * dec2027 23/24, impossible 22/24, and mar2027, jul2027, pins and monthEnd 24/24 (monthEnd was
+ * 9/24 before the engine looked at the day after the month). So after a change to the rules, the
+ * weights, construct or the moves, a red run may be seed noise. Before changing a seed or an
+ * assertion, compare the pass rates over many seeds before and after the change, and keep the
+ * change only if no scenario's rate drops. Never weaken an assertion to make a seed pass.
  *
  * SCENARIO_SEEDS (such as `1-24` or `1,5,7-9`) replaces the seeds of every scenario. A sweep, one
  * process per scenario:
  *
  *   d=$(mktemp -d)
- *   for s in jan2027 feb2027 mar2027 dec2027 jul2027 impossible pins; do
+ *   for s in jan2027 feb2027 mar2027 dec2027 jul2027 impossible pins monthEnd; do
  *     SCENARIO_SEEDS=1-24 npx vitest run src/generator/scenarios.test.ts -t $s > $d/$s.txt &
  *   done; wait; grep 'Tests ' $d/*.txt
  */
@@ -213,6 +214,34 @@ describe('generator scenarios', () => {
       const row = rowOf(g, rows, 'D');
       const pinned = ['11', '12', '13', '14', '15'].map((day) => row[dayOf(g, `2027-01-${day}`)]);
       expect(pinned).toEqual([Code.N, Code.N, Code.N, Code.N, Code.N]);
+    },
+    TIMEOUT,
+  );
+
+  // Seeds 2, 3 and 5 are the first three of 1-8 on which the search, blind to the day after the
+  // month, put C or E on the night of 31 January: the test fails on all three without the fix.
+  it.each(seeds([2, 3, 5]))(
+    'monthEnd, seed %i: no must broken, and no night on 31 January before a request on 1 February',
+    async (seed) => {
+      const { g, rows, ev } = await generate('monthEnd', seed);
+      expect(ev.mustUnits, musts(g, ev)).toBe(0);
+
+      // The same without the engine that steered the search: C, D, E and F have the morning of
+      // 1 February taken, so none of them may be on a night that ends in it.
+      const last = g.ctx.days.length - 1;
+      expect(g.ctx.days[last].date).toBe('2027-01-31');
+      for (const id of ['C', 'D', 'E', 'F']) {
+        const code = rowOf(g, rows, id)[last];
+        expect(isNight(code), `${id}'s code on 31 January`).toBe(false);
+      }
+
+      // And February, which reads January's last days as its tail, finds nothing wrong at its start.
+      const { data, month } = scenario('monthEnd');
+      const february = buildMonthGrid(applyRows(data, month, rows, g.fixed), '2027-02');
+      const wrong = evaluateMonth(february.ctx, february.rows, true).findings.filter(
+        (f) => f.severity === 'must' && (f.rule === 'M2' || f.rule === 'M4'),
+      );
+      expect(wrong.map((f) => f.message)).toEqual([]);
     },
     TIMEOUT,
   );

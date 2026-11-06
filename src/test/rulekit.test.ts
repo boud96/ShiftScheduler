@@ -32,6 +32,12 @@ describe('ctxFor', () => {
     expect(c.people[2].prefs.nights).toBe('normal');
     expect(c.people[2].history).toEqual({ twelve: 0, nights: 0, holidayTwelve: 0, festive: 0 });
   });
+  it('stores the code of a patch on day 1 of the next month, also past the end of a year', () => {
+    const c = ctxFor('2027-02', [{ nextDay: 'x' }, {}, { nextDay: 'R1' }]);
+    expect(c.people.map((p) => p.nextDay)).toEqual([Code.X, Code.EMPTY, Code.R1]);
+    const december = ctxFor('2027-12', [{ nextDay: 'DOV' }]);
+    expect(december.people[0].nextDay).toBe(Code.DOV);
+  });
   it('lays the settings over the defaults', () => {
     const wishLevels = { ...defaultSettings().wishLevels, W6: 5 as const };
     const c = ctxFor('2027-02', 1, { minRestHours: 10, wishLevels });

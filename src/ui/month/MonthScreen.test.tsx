@@ -953,6 +953,33 @@ describe('Kontrola', () => {
     expect(screen.queryByText(/31\. 12\./, { selector: 'button' })).toBeNull();
   });
 
+  it('lists the last day of the month against what is stored for the day after it', () => {
+    // 1 February is not on this screen, but a request or a shift stored there still matters.
+    const data = calm();
+    put(data, '2027-01-31', 'C', 'N12');
+    put(data, '2027-02-01', 'C', 'x');
+    put(data, '2027-01-31', 'D', 'N12');
+    put(data, '2027-02-01', 'D', 'R1');
+    renderMonth(data);
+    expect(lines()).toEqual([
+      'Operátor C · 31. 1.: noční N12 končí ráno 1. 2., kdy je x',
+      'Operátor D · 31. 1.: R1 1. 2. hned po N12: jen 0 h odpočinku (min. 12 h)',
+    ]);
+    expect(checks().getByText('Musí: 2 · Přání: 0')).toBeInTheDocument();
+    expect(cell('C', '2027-01-31')).toHaveClass('must'); // the last day is outlined
+    expect(cell('D', '2027-01-31')).toHaveClass('must');
+  });
+
+  it('does not list the last day against a day after it on which the person has left the team', () => {
+    const data = calm();
+    data.people[2].activeTo = '2027-01-31'; // C
+    put(data, '2027-01-31', 'C', 'N12');
+    put(data, '2027-02-01', 'C', 'x');
+    renderMonth(data);
+    expect(lines()).toEqual([]);
+    expect(checks().getByText('Musí: 0 · Přání: 0')).toBeInTheDocument();
+  });
+
   it('reads the name alone for a person finding that has no day', () => {
     renderMonth(plan(2)); // no hours: both are below FPD (rule M6)
     expect(checks().getByText('Operátor A: 0 h z 157,5 h: chybí 157,5 h do FPD')).toBeVisible();

@@ -1,3 +1,4 @@
+import { addMonths } from '../domain/calendar';
 import { codeFromName } from '../domain/codes';
 import { buildMonthGrid } from '../domain/context';
 import type { MonthContext } from '../domain/context';
@@ -6,6 +7,7 @@ import { evaluateMonth } from '../domain/rules/evaluate';
 import type { MonthEval } from '../domain/rules/evaluate';
 import type { Finding, RuleId } from '../domain/rules/types';
 import type {
+  CodeName,
   FairnessCounts,
   ISODate,
   MonthKey,
@@ -20,6 +22,8 @@ export interface PersonPatch {
   activeFrom?: ISODate | null;
   activeTo?: ISODate | null;
   startingCounts?: Partial<FairnessCounts>;
+  /** The code stored for the person on day 1 of the month after the one asked for. */
+  nextDay?: CodeName;
 }
 
 /**
@@ -41,6 +45,10 @@ export function ctxFor(
     person.activeFrom = patch.activeFrom ?? null;
     person.activeTo = patch.activeTo ?? null;
     person.startingCounts = { ...person.startingCounts, ...patch.startingCounts };
+    if (patch.nextDay !== undefined) {
+      const after = `${addMonths(month, 1)}-01`;
+      (data.cells[after] ??= {})[person.id] = { code: patch.nextDay };
+    }
     return person;
   });
   return buildMonthGrid(data, month).ctx;

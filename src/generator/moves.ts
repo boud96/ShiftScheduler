@@ -84,37 +84,54 @@ function tooLittleRest(table: Uint8Array, before: number, after: number): boolea
   return table[before * CODES + after] === 1;
 }
 
-/** Whether `code` on day `d` of `row` leaves too little rest after day d - 1 or before d + 1. */
-function tooLittleRestAround(table: Uint8Array, row: Uint8Array, d: number, code: number): boolean {
+/**
+ * The code on the day after day `d` of `row`. After the last day of the month it is `next`, what
+ * the person has stored for day 1 of the next month (`EnginePerson.nextDay`), which is no cell of
+ * the row.
+ */
+function dayAfter(row: Uint8Array, d: number, next: number): number {
+  return d + 1 < row.length ? row[d + 1] : next;
+}
+
+/**
+ * Whether `code` on day `d` of `row` leaves too little rest after day d - 1 or before d + 1. The
+ * person's `next` follows the last day.
+ */
+function tooLittleRestAround(
+  table: Uint8Array,
+  row: Uint8Array,
+  d: number,
+  code: number,
+  next: number,
+): boolean {
   return (
-    tooLittleRest(table, row[d - 1], code) ||
-    (d + 1 < row.length && tooLittleRest(table, code, row[d + 1]))
+    tooLittleRest(table, row[d - 1], code) || tooLittleRest(table, code, dayAfter(row, d, next))
   );
 }
 
 /** `leavesTooLittleRest` with the rest table of the month in hand. */
 function breaksRest(table: Uint8Array, st: SearchState, m: Move): boolean {
   const { rows } = st;
+  const { people } = st.ctx;
   switch (m.kind) {
     case 'swapDay':
       return (
-        tooLittleRestAround(table, rows[m.p], m.d, rows[m.q][m.d]) ||
-        tooLittleRestAround(table, rows[m.q], m.d, rows[m.p][m.d])
+        tooLittleRestAround(table, rows[m.p], m.d, rows[m.q][m.d], people[m.p].nextDay) ||
+        tooLittleRestAround(table, rows[m.q], m.d, rows[m.p][m.d], people[m.q].nextDay)
       );
     case 'set':
-      return tooLittleRestAround(table, rows[m.p], m.d, m.code);
+      return tooLittleRestAround(table, rows[m.p], m.d, m.code, people[m.p].nextDay);
     case 'swapRange': {
       // Within the range each person gets the other's days whole, pairs of days included: the
-      // pairs the swap makes are the two at its ends.
+      // pairs the swap makes are the two at its ends. After the last day of the month, the pair is
+      // with what the person has stored for the next one.
       const { p, q, d } = m;
       const e = d + m.len - 1;
-      const n = rows[p].length;
       return (
         tooLittleRest(table, rows[p][d - 1], rows[q][d]) ||
         tooLittleRest(table, rows[q][d - 1], rows[p][d]) ||
-        (e + 1 < n &&
-          (tooLittleRest(table, rows[q][e], rows[p][e + 1]) ||
-            tooLittleRest(table, rows[p][e], rows[q][e + 1])))
+        tooLittleRest(table, rows[q][e], dayAfter(rows[p], e, people[p].nextDay)) ||
+        tooLittleRest(table, rows[p][e], dayAfter(rows[q], e, people[q].nextDay))
       );
     }
     case 'shiftMove': {
@@ -122,7 +139,7 @@ function breaksRest(table: Uint8Array, st: SearchState, m: Move): boolean {
       const row = rows[m.p];
       const code = row[m.from];
       const before = m.to - 1 === m.from ? Code.EMPTY : row[m.to - 1];
-      const after = m.to + 1 === m.from || m.to + 1 >= row.length ? Code.EMPTY : row[m.to + 1];
+      const after = m.to + 1 === m.from ? Code.EMPTY : dayAfter(row, m.to, people[m.p].nextDay);
       return tooLittleRest(table, before, code) || tooLittleRest(table, code, after);
     }
   }
@@ -132,7 +149,8 @@ function breaksRest(table: Uint8Array, st: SearchState, m: Move): boolean {
  * Whether move `m` would put two shifts on days next to each other with less rest between them
  * than the settings ask for (rule M2), in a pair of days that the move makes. A pair it leaves
  * as it was, or moves whole to another person (inside a `swapRange`), is not looked at. Day 1 is
- * paired with the last day of the previous month, as M2 does.
+ * paired with the last day of the previous month, and the last day with the shift that the person
+ * has stored for day 1 of the next month, as M2 does.
  *
  * So, on a month that breaks M2 nowhere, it tells exactly the moves after which M2 finds a
  * shift with too little rest.

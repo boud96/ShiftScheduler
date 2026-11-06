@@ -12,7 +12,8 @@ export type ScenarioName =
   | 'dec2027'
   | 'jul2027'
   | 'impossible'
-  | 'pins';
+  | 'pins'
+  | 'monthEnd';
 
 export interface Scenario {
   data: AppData;
@@ -92,7 +93,10 @@ function january(): AppData {
  *   are away on any day;
  * - `impossible`: `feb2027`, with everyone but H off on the weekend of 13 and 14 February, whose
  *   four 12-hour shifts H alone cannot cover;
- * - `pins`: `jan2027`, with D pinned to N from 11 to 15 January.
+ * - `pins`: `jan2027`, with D pinned to N from 11 to 15 January;
+ * - `monthEnd`: `jan2027`, with requests already stored for Mon 1 February 2027, the day after the
+ *   month: C, E and F have asked for it off, and D is on leave. So none of the four, who are the
+ *   people who work nights most willingly, can work the night of Sun 31 January.
  *
  * Each call returns fresh objects.
  */
@@ -131,6 +135,12 @@ export function scenario(name: ScenarioName): Scenario {
     case 'pins': {
       const data = january();
       putRange(data, '2027-01-11', '2027-01-15', 'D', 'N', true);
+      return { data, month: '2027-01' };
+    }
+    case 'monthEnd': {
+      const data = january();
+      for (const id of ['C', 'E', 'F']) put(data, '2027-02-01', id, 'x');
+      put(data, '2027-02-01', 'D', 'DOV');
       return { data, month: '2027-01' };
     }
   }

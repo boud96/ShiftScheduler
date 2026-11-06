@@ -1,4 +1,4 @@
-import { TAIL_DAYS, monthDays, tailDays } from './calendar';
+import { TAIL_DAYS, addDays, monthDays, tailDays } from './calendar';
 import type { DayInfo } from './calendar';
 import { Code, codeFromName, isAbsence, isShift, nameOf } from './codes';
 import type { CodeInt } from './codes';
@@ -6,6 +6,7 @@ import { effectiveWeights } from './rules/weights';
 import type {
   AppData,
   FairnessCounts,
+  ISODate,
   MonthKey,
   Person,
   PersonId,
@@ -24,6 +25,13 @@ export interface EnginePerson {
   active: Uint8Array;
   /** Fairness counts brought in from the months before. */
   history: FairnessCounts;
+  /**
+   * The code stored for the person on day 1 of the next month, the day after the last of
+   * `MonthContext.days`. It is read only and no cell of the rows: the rules that pair a day with
+   * the day after it (M2, M4) read it for the pair that the last day of the month makes. It is
+   * `Code.EMPTY` when nothing is stored there, and when the person is not in the team on that day.
+   */
+  nextDay: CodeInt;
 }
 
 /** Everything the rule engine needs about one month, apart from the cells themselves. */
@@ -58,6 +66,14 @@ const contextDays = (month: MonthKey, settings: Settings): DayInfo[] => [
   ...monthDays(month, settings),
 ];
 
+/** Whether the person is in the team on `date`. The first and the last active day count. */
+function activeOn(person: Person, date: ISODate): boolean {
+  return (
+    (person.activeFrom === null || date >= person.activeFrom) &&
+    (person.activeTo === null || date <= person.activeTo)
+  );
+}
+
 /**
  * The people who are in the team on at least one day of the month, in the order of `data.people`,
  * each with the days on which they are. The first and the last active day count as active.
@@ -65,12 +81,7 @@ const contextDays = (month: MonthKey, settings: Settings): DayInfo[] => [
 function membersOf(data: AppData, days: DayInfo[]): Member[] {
   const members: Member[] = [];
   for (const person of data.people) {
-    const active = Uint8Array.from(days, ({ date }) =>
-      (person.activeFrom === null || date >= person.activeFrom) &&
-      (person.activeTo === null || date <= person.activeTo)
-        ? 1
-        : 0,
-    );
+    const active = Uint8Array.from(days, ({ date }) => (activeOn(person, date) ? 1 : 0));
     if (active.subarray(TAIL_DAYS).includes(1)) members.push({ person, active });
   }
   return members;
@@ -83,10 +94,14 @@ function membersOf(data: AppData, days: DayInfo[]): Member[] {
  * A cell is fixed when it is a day of the previous month, holds x or an absence, is a pinned shift,
  * or lies on a day on which the person is not in the team. Whatever is stored on such a day stays
  * in the row, so that rule M3 can flag a shift there.
+ *
+ * What is stored for a person on day 1 of the next month goes to `EnginePerson.nextDay`, outside
+ * the rows: the month's last day is judged against it, and no move can change it.
  */
 export function buildMonthGrid(data: AppData, month: MonthKey): MonthGrid {
   const { settings } = data;
   const days = contextDays(month, settings);
+  const dayAfter = addDays(days[days.length - 1].date, 1);
   const adjustments = data.months[month]?.hoursAdjust;
   const people: EnginePerson[] = [];
   const rows: Uint8Array[] = [];
@@ -111,12 +126,14 @@ export function buildMonthGrid(data: AppData, month: MonthKey): MonthGrid {
           : 0;
       if (day.inMonth && inTeam && day.weekday < 5) weekdays++;
     });
+    const next = activeOn(person, dayAfter) ? data.cells[dayAfter]?.[person.id] : undefined;
     people.push({
       id: person.id,
       prefs: person.prefs,
       fpd: weekdays * settings.fpdHoursPerWeekday + (adjustments?.[person.id] ?? 0),
       active,
       history: person.startingCounts,
+      nextDay: codeFromName(next?.code ?? '') ?? Code.EMPTY,
     });
     rows.push(row);
     fixed.push(locked);

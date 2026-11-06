@@ -160,6 +160,85 @@ describe('buildMonthGrid in detail', () => {
   });
 });
 
+describe('the day after the month', () => {
+  // The code stored for a person on day 1 of the next month goes to `nextDay`, outside the rows.
+  const nextDays = (data: ReturnType<typeof newAppData>, month: string) =>
+    buildMonthGrid(data, month).ctx.people.map((p) => p.nextDay);
+
+  it('is the code stored for each person on day 1 of the next month, and EMPTY for the rest', () => {
+    const data = newAppData();
+    data.cells['2027-02-01'] = {
+      p1: { code: 'x' },
+      p2: { code: 'DOV' },
+      p3: { code: 'R1', pinned: true },
+      p4: { code: 'N12' },
+    };
+    expect(nextDays(data, '2027-01')).toEqual([
+      Code.X, Code.DOV, Code.R1, Code.N12, Code.EMPTY, Code.EMPTY, Code.EMPTY, Code.EMPTY,
+    ]);
+  });
+  it('is EMPTY for everyone when nothing is stored there', () => {
+    const data = newAppData();
+    data.cells['2027-01-31'] = { p1: { code: 'N' } };
+    data.cells['2027-02-02'] = { p1: { code: 'x' } }; // day 2, not day 1
+    data.cells['2026-12-31'] = { p2: { code: 'x' } }; // the day before the month
+    expect(nextDays(data, '2027-01')).toEqual(Array(8).fill(Code.EMPTY));
+    expect(nextDays(newAppData(), '2027-01')).toEqual(Array(8).fill(Code.EMPTY));
+  });
+  it('is the day after the last day of the month, whatever its length', () => {
+    const data = newAppData();
+    data.cells['2027-03-01'] = { p1: { code: 'x' } };
+    data.cells['2028-02-29'] = { p1: { code: 'NEM' } }; // the last day of a leap February
+    data.cells['2028-03-01'] = { p1: { code: 'OP' } };
+    expect(nextDays(data, '2027-02')[0]).toBe(Code.X); // February 2027 has 28 days
+    expect(nextDays(data, '2028-02')[0]).toBe(Code.OP); // February 2028 has 29, the 29th is no next day
+    expect(buildMonthGrid(data, '2028-02').rows[0][7 + 28]).toBe(Code.NEM);
+  });
+  it('is in the next year for a December', () => {
+    const data = newAppData();
+    data.cells['2028-01-01'] = { p1: { code: 'x' } };
+    data.cells['2027-01-01'] = { p2: { code: 'x' } }; // the January of the same year is not it
+    expect(nextDays(data, '2027-12').slice(0, 2)).toEqual([Code.X, Code.EMPTY]);
+  });
+  it('is EMPTY for a person who is not in the team on that day', () => {
+    const data = newAppData();
+    for (const person of data.people.slice(0, 3)) {
+      data.cells['2027-02-01'] = { ...data.cells['2027-02-01'], [person.id]: { code: 'x' } };
+    }
+    data.people[0].activeTo = '2027-01-31'; // leaves with the month
+    data.people[1].activeTo = '2027-02-01'; // leaves on that day, which still counts
+    expect(nextDays(data, '2027-01').slice(0, 3)).toEqual([Code.EMPTY, Code.X, Code.X]);
+  });
+  it('is the code of a person who joins the team on that day or is there from before', () => {
+    const data = newAppData();
+    data.cells['2027-02-01'] = { p1: { code: 'DOV' }, p2: { code: 'DOV' } };
+    data.people[0].activeFrom = '2027-01-31'; // joins on the last day: in the month, in the team
+    data.people[1].activeFrom = '2027-02-01'; // joins the day after: not in January at all
+    const g = buildMonthGrid(data, '2027-01');
+    expect(g.personIds).not.toContain('p2');
+    expect(g.ctx.people[0].nextDay).toBe(Code.DOV);
+  });
+  it('is no cell of the rows, and the data is only read', () => {
+    const data = newAppData();
+    data.cells['2027-02-01'] = { p1: { code: 'x' } };
+    const before = structuredClone(data);
+    const g = buildMonthGrid(data, '2027-01');
+    expect(g.rows.every((row) => row.length === 7 + 31)).toBe(true);
+    expect(g.fixed.every((row) => row.length === 7 + 31)).toBe(true);
+    expect(data).toEqual(before);
+    // writing the rows back leaves what is stored for the next month alone
+    expect(applyRows(data, '2027-01', g.rows, g.fixed).cells['2027-02-01']).toEqual({
+      p1: { code: 'x' },
+    });
+  });
+  it('does not make a person a member of the month, nor change the FPD', () => {
+    const data = newAppData();
+    const without = buildMonthGrid(data, '2027-01').ctx.people.map((p) => p.fpd);
+    data.cells['2027-02-01'] = { p1: { code: 'DOV' } };
+    expect(buildMonthGrid(data, '2027-01').ctx.people.map((p) => p.fpd)).toEqual(without);
+  });
+});
+
 describe('applyRows in detail', () => {
   it('gives the same cells back when the rows were not edited', () => {
     const data = newAppData();

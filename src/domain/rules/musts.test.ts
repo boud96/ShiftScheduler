@@ -1,6 +1,9 @@
 import { describe, it, expect } from 'vitest';
 import { ctxFor, noWishes, rowsOf, run, rules } from '../../test/rulekit';
-import { defaultSettings } from '../defaults';
+import { buildMonthGrid } from '../context';
+import { defaultSettings, newAppData } from '../defaults';
+import type { CodeName } from '../types';
+import { evaluateMonth } from './evaluate';
 import { BELOW_FPD, GAP, HARD } from './weights';
 const c = ctxFor('2027-02', 1);
 const n = (strip: string, id: Parameters<typeof rules>[1], tail?: string) =>
@@ -149,7 +152,7 @@ describe('M4 in detail', () => {
       .toEqual([[[c.first - 1, c.first], 'noční N končí ráno v den, kdy je x']]);
     expect(n('', 'M4', '- - - - - N x')).toBe(0);
   });
-  it('has nothing to say about the last night of the month, whose morning is next month', () => {
+  it('has nothing to say about the last night of the month when nothing is stored for its morning', () => {
     expect(n(at(27, 'N'), 'M4')).toBe(0);
   });
 });
@@ -324,5 +327,135 @@ describe('must units and scores', () => {
     const ev = run(bare, rowsOf(bare, []));
     expect(ev.mustUnits).toBe(20 * 5 + 8 * 2 + 1);
     expect(ev.score).toBe((20 * 5 + 8 * 2) * GAP + BELOW_FPD * 150);
+  });
+});
+
+// The morning after the last night of the month, and the shift after the last one, are on day 1 of
+// the next month. The engine reads what is stored there for each person (`nextDay`), as it reads
+// the tail of the previous month, and judges the pairs of days that the end of the month makes.
+describe('the day after the month', () => {
+  // February 2027 ends on Sun 28 Feb, a 12-hour day, and March on Wed 31 Mar, a weekday.
+  const feb = (nextDay?: CodeName, min = 12) =>
+    ctxFor('2027-02', [{ nextDay }], { minRestHours: min });
+  const mar = (nextDay?: CodeName, settings = {}) => ctxFor('2027-03', [{ nextDay }], settings);
+  const lastOf = (k: ReturnType<typeof feb>) => k.days.length - 1;
+  /** The findings of rule `id` when `code` is the last day of the month. */
+  const found = (k: ReturnType<typeof feb>, code: string, id: Parameters<typeof rules>[1]) =>
+    rules(run(k, rowsOf(k, [at(k.days.length - k.first - 1, code)])), id);
+
+  describe('M4', () => {
+    it.each(['x', 'DOV', 'MD', 'OP', 'NEM'] as const)(
+      'is broken by a night on the last day and %s stored for the morning after',
+      (next) => {
+        const k = feb(next);
+        expect(found(k, 'N12', 'M4')).toEqual([{
+          rule: 'M4', severity: 'must', person: 0, days: [lastOf(k)],
+          message: `noční N12 končí ráno 1. 3., kdy je ${next}`, penalty: HARD,
+        }]);
+      },
+    );
+    it('holds for N as well as N12', () => {
+      const k = mar('x');
+      expect(found(k, 'N', 'M4').map((f) => f.message)).toEqual(['noční N končí ráno 1. 4., kdy je x']);
+    });
+    it('has nothing to say when the morning after is free, or holds a shift', () => {
+      expect(found(feb(), 'N12', 'M4')).toEqual([]);
+      expect(found(mar('R1'), 'N', 'M4')).toEqual([]); // a shift: M2, not M4
+      expect(found(mar('N'), 'N', 'M4')).toEqual([]);
+    });
+    it('is about nights: another shift before a request or an absence is fine', () => {
+      expect(found(feb('x'), 'R12', 'M4')).toEqual([]);
+      expect(found(mar('DOV'), 'O', 'M4')).toEqual([]);
+      expect(found(feb('x'), '-', 'M4')).toEqual([]);
+    });
+    it('does not look at a person who is not in the team on day 1 of the next month', () => {
+      const gone = ctxFor('2027-02', [{ nextDay: 'x', activeTo: '2027-02-28' }]);
+      expect(gone.people[0].nextDay).toBe(0);
+      expect(found(gone, 'N12', 'M4')).toEqual([]);
+      const still = ctxFor('2027-02', [{ nextDay: 'x', activeTo: '2027-03-01' }]);
+      expect(found(still, 'N12', 'M4')).toHaveLength(1);
+    });
+    it('looks past the end of a year: December into January', () => {
+      const k = ctxFor('2027-12', [{ nextDay: 'x' }]); // Fri 31 Dec 2027, then Sat 1 Jan 2028
+      expect(found(k, 'N', 'M4').map((f) => [f.days, f.message]))
+        .toEqual([[[lastOf(k)], 'noční N končí ráno 1. 1., kdy je x']]);
+    });
+    it('reads the next day from the data that the context is built from', () => {
+      const data = newAppData();
+      data.cells['2028-01-01'] = { [data.people[0].id]: { code: 'DOV' } };
+      const g = buildMonthGrid(data, '2027-12');
+      g.rows[0][g.ctx.days.length - 1] = 5; // N on Fri 31 Dec
+      const m4 = evaluateMonth(g.ctx, g.rows, true).findings.filter((f) => f.rule === 'M4');
+      expect(m4.map((f) => f.message)).toEqual(['noční N končí ráno 1. 1., kdy je DOV']);
+    });
+  });
+
+  describe('M2', () => {
+    // The rest rule is the one of two days inside the month: the same pairs break it.
+    it.each([['O', 'R1', 1], ['O', 'R2', 1], ['O20', 'R1', 1], ['O20', 'R2', 0], ['N', 'R1', 1],
+      ['N', 'N', 0], ['R1', 'R1', 0]] as const)(
+      '%s on the last day and %s stored for the day after → %i',
+      (last, next, count) => expect(found(mar(next), last, 'M2')).toHaveLength(count),
+    );
+    it('is one finding on the last day, worth HARD, naming the date of the shift stored', () => {
+      const k = mar('R1');
+      expect(found(k, 'O', 'M2')).toEqual([{
+        rule: 'M2', severity: 'must', person: 0, days: [lastOf(k)],
+        message: 'R1 1. 4. hned po O: jen 8 h odpočinku (min. 12 h)', penalty: HARD,
+      }]);
+    });
+    it('quotes no rest at all after a night that ends where the shift begins', () => {
+      expect(found(mar('R1'), 'N', 'M2')[0].message)
+        .toBe('R1 1. 4. hned po N: jen 0 h odpočinku (min. 12 h)');
+      expect(found(mar('R2'), 'N', 'M2')[0].message)
+        .toBe('R2 1. 4. hned po N: jen 2 h odpočinku (min. 12 h)');
+    });
+    it('needs a shift on both days', () => {
+      expect(found(mar('x'), 'O', 'M2')).toEqual([]);
+      expect(found(mar('DOV'), 'N', 'M2')).toEqual([]);
+      expect(found(mar('R1'), '-', 'M2')).toEqual([]);
+      expect(found(mar('R1'), 'x', 'M2')).toEqual([]);
+    });
+    it('compares with the minimum in the settings and quotes it', () => {
+      expect(found(ctxFor('2027-03', [{ nextDay: 'R1' }], { minRestHours: 8 }), 'O', 'M2')).toEqual([]);
+      expect(found(ctxFor('2027-03', [{ nextDay: 'R1' }], { minRestHours: 8.5 }), 'O', 'M2')[0].message)
+        .toBe('R1 1. 4. hned po O: jen 8 h odpočinku (min. 8,5 h)');
+    });
+    it('takes the rest from the shift times in the settings', () => {
+      const shifts = { ...defaultSettings().shifts, R1: { start: 390, end: 870, hours: 7.5 } };
+      expect(found(mar('R1', { shifts }), 'O', 'M2')[0].message)
+        .toBe('R1 1. 4. hned po O: jen 8,5 h odpočinku (min. 12 h)');
+    });
+    it('does not look at a person who is not in the team on day 1 of the next month', () => {
+      const gone = ctxFor('2027-03', [{ nextDay: 'R1', activeTo: '2027-03-31' }]);
+      expect(found(gone, 'O', 'M2')).toEqual([]);
+    });
+    it('looks past the end of a year: December into January', () => {
+      const k = ctxFor('2027-12', [{ nextDay: 'R12' }]); // N, then R12 on Sat 1 Jan 2028
+      expect(found(k, 'N', 'M2').map((f) => f.message))
+        .toEqual(['R12 1. 1. hned po N: jen 0 h odpočinku (min. 12 h)']);
+    });
+  });
+
+  describe('score and units', () => {
+    const k = ctxFor('2027-02', [{ nextDay: 'x' }], { coverage: noCoverage, wishLevels: noWishes() });
+    it('count a unit and HARD for each, with a sink or without', () => {
+      const ev = run(k, rowsOf(k, [at(27, 'N12')]));
+      expect(ev.persons[0].mustUnits).toBe(2); // M4, and M6 for the hours short of FPD
+      expect(ev.score).toBe(HARD + BELOW_FPD * (150 - 11.5));
+      expect(evaluateMonth(k, rowsOf(k, [at(27, 'N12')]))).toMatchObject({ mustUnits: 2, score: ev.score });
+    });
+    it('are what they were when nothing is stored for the day after', () => {
+      const bare = ctxFor('2027-02', 1, { coverage: noCoverage, wishLevels: noWishes() });
+      const ev = run(bare, rowsOf(bare, [at(27, 'N12')]));
+      expect(ev.persons[0].mustUnits).toBe(1);
+      expect(ev.score).toBe(BELOW_FPD * (150 - 11.5));
+    });
+    it('add the unit to the person of the last day only, and leave the others alone', () => {
+      const two = ctxFor('2027-02', [{ nextDay: 'x' }, { nextDay: 'x' }],
+        { coverage: noCoverage, wishLevels: noWishes() });
+      const ev = run(two, rowsOf(two, [at(27, 'N12'), at(27, 'R12')]));
+      expect(ev.persons.map((s) => s.mustUnits)).toEqual([2, 1]);
+    });
   });
 });

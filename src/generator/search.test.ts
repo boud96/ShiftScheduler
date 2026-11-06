@@ -12,7 +12,7 @@ import { search } from './search';
 import { mulberry32 } from './rng';
 import type { MonthContext, MonthGrid } from '../domain/context';
 import { HARD } from '../domain/rules/weights';
-import type { Settings } from '../domain/types';
+import type { CodeName, PersonId, Settings } from '../domain/types';
 import { scenario } from '../test/scenarios';
 
 const jan = () => { const d = newAppData(); d.people = syntheticTeam(); return buildMonthGrid(d, '2027-01'); };
@@ -29,6 +29,39 @@ describe('generator core', () => {
         expect(Math.abs(st.score - full) / Math.max(1, full)).toBeLessThan(1e-9);
       }
     }
+  });
+  it('incremental score equals a full evaluation when cells are stored for the day after', () => {
+    // Mon 1 February is the day after this month: what the people have stored there makes pairs
+    // with the last day, whichever way the moves go.
+    const { data, month } = scenario('jan2027');
+    data.cells['2027-02-01'] = {
+      A: { code: 'R1' }, B: { code: 'N' }, C: { code: 'x' }, D: { code: 'DOV' },
+      E: { code: 'x' }, F: { code: 'O' }, G: { code: 'R2', pinned: true }, H: { code: 'N' },
+    };
+    const g = buildMonthGrid(data, month);
+    const st = new SearchState(g.ctx, g.rows, g.fixed);
+    const rnd = mulberry32(17);
+    construct(st, rnd);
+    const last = g.ctx.days.length - 1;
+    const atTheEnd = (rows: Uint8Array[]) =>
+      evaluateMonth(g.ctx, rows, true).findings.filter(
+        (f) => (f.rule === 'M2' || f.rule === 'M4') && f.days.length === 1 && f.days[0] === last,
+      ).length;
+    let seen = 0;
+    for (let i = 0; i < 3000; i++) {
+      const m = proposeMove(st, rnd); if (!m) continue;
+      st.tryMove(m);
+      const full = evaluateMonth(g.ctx, st.rows);
+      expect(Math.abs(st.score - full.score) / Math.max(1, full.score)).toBeLessThan(1e-9);
+      expect(st.mustUnits).toBe(full.mustUnits);
+      seen += atTheEnd(st.rows);
+      if (rnd() < 0.5) st.commit(); else st.revert();
+    }
+    // the walk did put the last day against a stored cell wrongly now and then
+    expect(seen).toBeGreaterThan(0);
+    const reset = evaluateMonth(g.ctx, st.rows);
+    expect(Math.abs(st.score - reset.score) / Math.max(1, reset.score)).toBeLessThan(1e-9);
+    expect(st.mustUnits).toBe(reset.mustUnits);
   });
   it('never changes fixed cells', async () => {
     const d = newAppData(); d.people = syntheticTeam();
@@ -311,14 +344,15 @@ describe('generator limits', () => {
 });
 
 describe('rest pre-filter', () => {
-  /** How many pairs of days with too little rest the engine finds (M2). */
-  const restBreaks = (ctx: MonthContext, rows: Uint8Array[]) =>
-    evaluateMonth(ctx, rows, true).findings.filter((f) => f.rule === 'M2').length;
+  /** The pairs of days with too little rest that the engine finds (M2). */
+  const restFindings = (ctx: MonthContext, rows: Uint8Array[]) =>
+    evaluateMonth(ctx, rows, true).findings.filter((f) => f.rule === 'M2');
 
   /**
    * Rows with a random code that fits the day in every free cell of the month, and then, until
    * the engine finds no pair of days with too little rest, the later shift of each such pair
-   * emptied. Many shifts are covered twice: a must that costs HARD is broken all along.
+   * emptied (for a pair that the last day makes with the day after the month, the last day's).
+   * Many shifts are covered twice: a must that costs HARD is broken all along.
    */
   function randomRows(g: MonthGrid, rnd: () => number): Uint8Array[] {
     const { ctx } = g;
@@ -334,9 +368,9 @@ describe('rest pre-filter', () => {
       }
     });
     for (;;) {
-      const short = evaluateMonth(ctx, rows, true).findings.filter((f) => f.rule === 'M2');
+      const short = restFindings(ctx, rows);
       if (short.length === 0) return rows;
-      for (const f of short) rows[f.person as number][f.days[1]] = Code.EMPTY;
+      for (const f of short) rows[f.person as number][f.days[f.days.length - 1]] = Code.EMPTY;
     }
   }
 
@@ -353,34 +387,68 @@ describe('rest pre-filter', () => {
     ],
   ];
 
+  /** What each person has stored for Mon 1 February 2027, the day after January. */
+  const MORNING_AFTER: Record<PersonId, CodeName> = {
+    A: 'R1', B: 'R2', C: 'O', D: 'N', E: 'R1', F: 'O20', G: 'R2', H: 'N',
+  };
+
+  /**
+   * Walks random moves over a month in which a HARD must is broken, and checks the verdict of the
+   * pre-filter on each against the engine. Returns how many moves it flagged and let pass, and how
+   * many left too little rest at the end of the month, against the day after it.
+   */
+  function compare(adjust: (s: Settings) => void, shiftsOnTheFirst: boolean) {
+    const { data, month } = scenario('jan2027'); // a tail of nights, and requests
+    adjust(data.settings);
+    if (shiftsOnTheFirst) {
+      for (const [id, code] of Object.entries(MORNING_AFTER)) {
+        (data.cells['2027-02-01'] ??= {})[id] = { code };
+      }
+    }
+    const g = buildMonthGrid(data, month);
+    const rnd = mulberry32(31);
+    const st = new SearchState(g.ctx, randomRows(g, rnd), g.fixed);
+    expect(restFindings(g.ctx, st.rows)).toEqual([]);
+    // with a HARD must broken, every pick is proposed, those that leave too little rest too
+    expect(st.score).toBeGreaterThan(HARD);
+
+    let flagged = 0;
+    let passed = 0;
+    let atTheEnd = 0;
+    for (let k = 0; k < 2000; k++) {
+      const m = proposeMove(st, rnd);
+      if (!m) continue;
+      const verdict = leavesTooLittleRest(st, m);
+      st.tryMove(m);
+      const found = restFindings(g.ctx, st.rows);
+      expect(found.length > 0, JSON.stringify(m)).toBe(verdict);
+      if (found.some((f) => f.days.length === 1)) atTheEnd++;
+      if (verdict) flagged++;
+      else passed++;
+      // walk on, but never into a month with too little rest somewhere
+      if (!verdict && rnd() < 0.5) st.commit();
+      else st.revert();
+    }
+    return { flagged, passed, atTheEnd };
+  }
+
   it.each(variants)(
     'tells exactly the moves after which the engine finds too little rest (%s)',
     (_, adjust) => {
-      const { data, month } = scenario('jan2027'); // a tail of nights, and requests
-      adjust(data.settings);
-      const g = buildMonthGrid(data, month);
-      const rnd = mulberry32(31);
-      const st = new SearchState(g.ctx, randomRows(g, rnd), g.fixed);
-      expect(restBreaks(g.ctx, st.rows)).toBe(0);
-      // with a HARD must broken, every pick is proposed, those that leave too little rest too
-      expect(st.score).toBeGreaterThan(HARD);
-
-      let flagged = 0;
-      let passed = 0;
-      for (let k = 0; k < 2000; k++) {
-        const m = proposeMove(st, rnd);
-        if (!m) continue;
-        const verdict = leavesTooLittleRest(st, m);
-        st.tryMove(m);
-        expect(restBreaks(g.ctx, st.rows) > 0, JSON.stringify(m)).toBe(verdict);
-        if (verdict) flagged++;
-        else passed++;
-        // walk on, but never into a month with too little rest somewhere
-        if (!verdict && rnd() < 0.5) st.commit();
-        else st.revert();
-      }
+      const { flagged, passed } = compare(adjust, false);
       expect(flagged).toBeGreaterThan(200);
       expect(passed).toBeGreaterThan(200);
+    },
+  );
+
+  it.each(variants)(
+    'tells them at the end of the month too, against a shift stored for the day after (%s)',
+    (_, adjust) => {
+      const { flagged, passed, atTheEnd } = compare(adjust, true);
+      expect(flagged).toBeGreaterThan(200);
+      expect(passed).toBeGreaterThan(200);
+      // the moves that matter here are the ones on the last day: some of them were walked
+      expect(atTheEnd).toBeGreaterThan(5);
     },
   );
 
