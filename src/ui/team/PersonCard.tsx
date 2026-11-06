@@ -1,5 +1,3 @@
-import { useId, useState } from 'react';
-import type { ReactNode } from 'react';
 import type {
   FairnessCounts,
   ISODate,
@@ -8,6 +6,7 @@ import type {
   Rating,
   WeekdayShift,
 } from '../../domain/types';
+import { ChoiceSelect, Field, NumberField } from '../form';
 import { useApp } from '../store';
 import {
   AFTER_WEEKEND_CHOICES,
@@ -16,7 +15,6 @@ import {
   TEAM_SCREEN,
   WEEKEND_CHOICES,
 } from '../text';
-import type { Choice } from '../text';
 
 type AfterNightShift = Preferences['afterNights'][number];
 
@@ -45,97 +43,6 @@ const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
 function storedDate(text: string): ISODate | null | undefined {
   if (text === '') return null;
   return ISO_DATE.test(text) ? text : undefined;
-}
-
-/** The number that the text is, if it is a whole number of at least 0; otherwise null. */
-function wholeNumber(text: string): number | null {
-  if (!/^\d+$/.test(text)) return null;
-  const n = Number(text);
-  return Number.isSafeInteger(n) ? n : null;
-}
-
-/**
- * A box with its label above it. The label points at the box by its id and does not wrap it: the
- * text of a label that wraps a select includes all its options, and the label of a box is to be
- * the label alone, for the page's readers and for the tests that find a box by it.
- */
-function Field({ label, children }: { label: string; children: (id: string) => ReactNode }) {
-  const id = useId();
-  return (
-    <div className="field">
-      <label className="field-label" htmlFor={id}>
-        {label}
-      </label>
-      {children(id)}
-    </div>
-  );
-}
-
-/** The value of an option in the page, which holds text only: `null` is the empty text. */
-const keyOf = (value: string | number | null): string => (value === null ? '' : String(value));
-
-function ChoiceSelect<T extends string | number | null>(props: {
-  label: string;
-  value: T;
-  choices: readonly Choice<T>[];
-  onChange: (value: T) => void;
-}) {
-  const { label, value, choices, onChange } = props;
-  return (
-    <Field label={label}>
-      {(id) => (
-        <select
-          id={id}
-          value={keyOf(value)}
-          onChange={(e) => {
-            const picked = choices.find((choice) => keyOf(choice.value) === e.target.value);
-            if (picked !== undefined) onChange(picked.value);
-          }}
-        >
-          {choices.map((choice) => (
-            <option key={keyOf(choice.value)} value={keyOf(choice.value)}>
-              {choice.label}
-            </option>
-          ))}
-        </select>
-      )}
-    </Field>
-  );
-}
-
-/**
- * A whole number of at least 0. What is typed stays in the box as it is, even while it is no
- * number yet (the box is empty, a minus sign): only a number that is good is stored, and when the
- * box is left it shows the number that is stored.
- */
-function NumberField(props: { label: string; value: number; onChange: (value: number) => void }) {
-  const { label, value, onChange } = props;
-  const [text, setText] = useState(String(value));
-  const [shown, setShown] = useState(value);
-  if (value !== shown) {
-    // The number changed other than by typing here, e.g. another plan was opened.
-    setShown(value);
-    setText(String(value));
-  }
-  return (
-    <Field label={label}>
-      {(id) => (
-        <input
-          id={id}
-          type="number"
-          min={0}
-          step={1}
-          value={text}
-          onChange={(e) => {
-            setText(e.target.value);
-            const typed = wholeNumber(e.target.value);
-            if (typed !== null && typed !== value) onChange(typed);
-          }}
-          onBlur={() => setText(String(value))}
-        />
-      )}
-    </Field>
-  );
 }
 
 interface PersonCardProps {
@@ -219,7 +126,7 @@ export function PersonCard({ person, first, last, autoFocus = false }: PersonCar
         </button>
       </div>
 
-      <div className="field-grid">
+      <div className="form-field-grid">
         <Field label={TEAM_SCREEN.activeFrom}>
           {(id) => (
             <input
@@ -242,7 +149,7 @@ export function PersonCard({ person, first, last, autoFocus = false }: PersonCar
         </Field>
       </div>
 
-      <div className="field-grid">
+      <div className="form-field-grid">
         {RATED_SHIFTS.map((shift) => (
           <ChoiceSelect
             key={shift}
@@ -273,11 +180,11 @@ export function PersonCard({ person, first, last, autoFocus = false }: PersonCar
         onChange={(afterWeekend) => updatePrefs({ afterWeekend })}
       />
 
-      <fieldset className="group">
+      <fieldset className="form-group">
         <legend>{TEAM_SCREEN.afterNights}</legend>
-        <div className="check-row">
+        <div className="form-check-row">
           {AFTER_NIGHT_SHIFTS.map((shift) => (
-            <label key={shift} className="check">
+            <label key={shift} className="form-check">
               <input
                 type="checkbox"
                 checked={prefs.afterNights.includes(shift)}
@@ -300,7 +207,7 @@ export function PersonCard({ person, first, last, autoFocus = false }: PersonCar
         )}
       </Field>
 
-      <div className="field-grid">
+      <div className="form-field-grid">
         {ALLOWANCE_KEYS.map((key) => (
           <NumberField
             key={key}
@@ -311,9 +218,9 @@ export function PersonCard({ person, first, last, autoFocus = false }: PersonCar
         ))}
       </div>
 
-      <fieldset className="group">
+      <fieldset className="form-group">
         <legend>{TEAM_SCREEN.startingCounts}</legend>
-        <div className="field-grid">
+        <div className="form-field-grid">
           {COUNT_KEYS.map((key) => (
             <NumberField
               key={key}

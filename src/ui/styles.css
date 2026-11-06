@@ -307,44 +307,46 @@ h1 {
   font-weight: 600;
 }
 
-.field {
+/* The pieces of a form that the screens share (src/ui/form.tsx). */
+
+.form-field {
   display: flex;
   flex-direction: column;
   gap: 2px;
   min-width: 0;
 }
 
-.field-label,
-.group legend {
+.form-field-label,
+.form-group legend {
   font-size: 0.85rem;
   color: var(--muted);
 }
 
-.field-grid {
+.form-field-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
   gap: 8px 10px;
 }
 
-.group {
+.form-group {
   min-width: 0;
   padding: 0;
   margin: 0;
   border: 0;
 }
 
-.group legend {
+.form-group legend {
   padding: 0;
   margin-bottom: 4px;
 }
 
-.check-row {
+.form-check-row {
   display: flex;
   flex-wrap: wrap;
   gap: 4px 18px;
 }
 
-.check {
+.form-check {
   display: inline-flex;
   gap: 6px;
   align-items: center;
