@@ -37,5 +37,8 @@ export default defineConfig({
     globals: true,
     globalSetup: ['src/test/globalSetup.ts'],
     setupFiles: ['src/test/setup.ts'],
+    // A timeout is there to end a hang, not to judge speed. Two UI tests take about 4 s on a calm
+    // machine and fail on a busy desktop at the default 5 s.
+    testTimeout: 20_000,
   },
 });
