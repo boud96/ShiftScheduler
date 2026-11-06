@@ -1,4 +1,11 @@
-import type { AfterWeekend, NightsPref, Rating, WeekendStyle } from '../domain/types';
+import type {
+  AfterWeekend,
+  Level,
+  NightsPref,
+  Rating,
+  WeekendStyle,
+  WishId,
+} from '../domain/types';
 
 // The Czech wording of the UI. Each screen that needs labels adds its own here.
 
@@ -144,6 +151,38 @@ export const MONTH_SCREEN = {
   },
 };
 
+/** The Rules screen: its two sections, and the numbers of the first. */
+export const RULES_SCREEN = {
+  settings: 'Nastavení',
+  wishes: 'Důležitost přání',
+  minRest: 'Odpočinek mezi směnami (h)',
+  maxTwelve: 'Max. 12h směn za měsíc',
+  twelveTarget: 'Cíl 12h směn za měsíc',
+  timeBudget: 'Čas na generování (s)',
+};
+
+/**
+ * What each wish is called on the Rules screen. W5a is not `Cíl 12h směn za měsíc`, as the plan
+ * has it: the number of 12-hour shifts is called that, and two controls must not share a name.
+ */
+export const WISH_LABELS: Record<WishId, string> = {
+  W1: 'Co nejméně přesčasů',
+  W2: 'Stejná směna 4–5 dní v řadě',
+  W3: 'Po 5–6 dnech 2 dny volna',
+  W4a: 'Noční v delších blocích',
+  W4b: 'Před nočními volno (a předtím R2, O20 nebo O)',
+  W4c: 'Po nočních 2 dny volna',
+  W4d: 'Noční podle ochoty',
+  W5a: 'Držet se cíle 12h směn',
+  W5b: 'Celé víkendy podle přání',
+  W5c: 'Volno po víkendu podle přání',
+  W5d: 'Vedle R12 jen R1 nebo R2',
+  W6: 'Oblíbené směny',
+  W7: 'Férovost napříč měsíci',
+  W8: 'Neoblíbené směny rovnoměrně',
+  W9: 'Vyrovnané dny (R2)',
+};
+
 /** An option of a select, and the value that it stands for. */
 export interface Choice<T> {
   value: T;
@@ -183,4 +222,14 @@ export const AFTER_WEEKEND_CHOICES: readonly Choice<AfterWeekend>[] = [
   { value: 'want', label: 'Chci po víkendu volné dny' },
   { value: 'noAutomatic', label: 'Nerozdávat automaticky volné dny po víkendu' },
   { value: 'any', label: 'Je mi to jedno' },
+];
+
+/** How much a wish matters, from 0 (off) to 5 (the strongest); 3 is the usual. */
+export const LEVEL_CHOICES: readonly Choice<Level>[] = [
+  { value: 0, label: '0 – vypnuto' },
+  { value: 1, label: '1' },
+  { value: 2, label: '2' },
+  { value: 3, label: '3 – běžně' },
+  { value: 4, label: '4' },
+  { value: 5, label: '5 – hodně' },
 ];

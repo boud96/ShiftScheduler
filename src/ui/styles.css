@@ -171,11 +171,6 @@ h1 {
   display: none;
 }
 
-.coming-soon {
-  margin: 0;
-  color: var(--muted);
-}
-
 /* Start screen */
 
 .start-screen {
@@ -285,9 +280,12 @@ h1 {
   gap: 6px;
 }
 
+/* The boxes of the form pieces (src/ui/form.tsx): on the person card and on the Rules screen. */
 .person-card input:not([type='checkbox']),
 .person-card select,
-.person-card textarea {
+.person-card textarea,
+.rules-screen input,
+.rules-screen select {
   width: 100%;
   min-width: 0;
   padding: 5px 8px;
@@ -350,6 +348,28 @@ h1 {
   display: inline-flex;
   gap: 6px;
   align-items: center;
+}
+
+/* Rules screen */
+
+.rules-screen {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+}
+
+.rules-section h2 {
+  margin: 0 0 10px;
+  font-size: 1.1rem;
+}
+
+/* The columns are wide enough for the longest label on one line; where a label does wrap, the boxes
+   of its row still line up at the bottom. */
+.rules-fields {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 320px), 1fr));
+  gap: 10px 16px;
+  align-items: end;
 }
 
 /* Month screen */

@@ -3,24 +3,21 @@ import type { ComponentType } from 'react';
 import { SaveBar } from './SaveBar';
 import { StartScreen } from './StartScreen';
 import { MonthScreen } from './month/MonthScreen';
+import { RulesScreen } from './rules/RulesScreen';
 import { useApp } from './store';
 import { TeamScreen } from './team/TeamScreen';
-import { APP_TITLE, FILE_ERRORS, TABS_LABEL, TAB_LABELS, TAB_PANEL_SOON } from './text';
+import { APP_TITLE, FILE_ERRORS, TABS_LABEL, TAB_LABELS } from './text';
 
 type TabId = keyof typeof TAB_LABELS;
 type Screens = Record<TabId, ComponentType>;
 
 const TAB_IDS: readonly TabId[] = ['month', 'team', 'rules'];
 
-function ComingSoon() {
-  return <p className="coming-soon">{TAB_PANEL_SOON}</p>;
-}
-
-/** The screen of each tab. A tab shows a placeholder until its screen is built. */
+/** The screen of each tab. */
 const SCREENS: Screens = {
   month: MonthScreen,
   team: TeamScreen,
-  rules: ComingSoon,
+  rules: RulesScreen,
 };
 
 /**

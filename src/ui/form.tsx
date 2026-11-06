@@ -4,11 +4,22 @@ import type { Choice } from './text';
 
 // The pieces that the forms of the Team and the Rules screens are made of.
 
-/** The number that the text is, if it is a whole number of at least 0; otherwise null. */
-function wholeNumber(text: string): number | null {
-  if (!/^\d+$/.test(text)) return null;
+/** A plain number: digits, and digits after a point. No sign, no exponent, nothing to the side. */
+const PLAIN_NUMBER = /^\d+(\.\d+)?$/;
+
+/** How far a count of steps may be from a whole number and still be one (0.1 is not exact). */
+const STEP_TOLERANCE = 1e-9;
+
+/**
+ * The number that the text is, if it may be stored: a plain number within `min` and `max` that
+ * lies on the step, counted from `min`. Otherwise null.
+ */
+function storableNumber(text: string, min: number, max: number, step: number): number | null {
+  if (!PLAIN_NUMBER.test(text)) return null;
   const n = Number(text);
-  return Number.isSafeInteger(n) ? n : null;
+  if (n < min || n > max) return null;
+  const steps = (n - min) / step;
+  return Math.abs(steps - Math.round(steps)) < STEP_TOLERANCE ? n : null;
 }
 
 /**
@@ -60,17 +71,28 @@ export function ChoiceSelect<T extends string | number | null>(props: {
   );
 }
 
-/**
- * A whole number of at least 0. What is typed stays in the box as it is, even while it is no
- * number yet (the box is empty, a minus sign): only a number that is good is stored, and when the
- * box is left it shows the number that is stored.
- */
-export function NumberField(props: {
+interface NumberFieldProps {
   label: string;
   value: number;
   onChange: (value: number) => void;
-}) {
-  const { label, value, onChange } = props;
+  /** The least number the box takes, 0 or more: the box takes no minus sign. Default 0. */
+  min?: number;
+  /** The most it takes. Default: no limit, but the number has to be one that stays exact. */
+  max?: number;
+  /** The distance between the numbers it takes, counted from `min`. Default 1: whole numbers. */
+  step?: number;
+}
+
+/**
+ * A number in a range, by default a whole number of at least 0. What is typed stays in the box as
+ * it is, even while it is no number yet (the box is empty, a minus sign): only a number that is
+ * good is stored, and when the box is left it shows the number that is stored. A number is good
+ * when it is within `min` and `max` and on the step: with a step of 0.5 a half is good, with the
+ * default step only a whole number is.
+ */
+export function NumberField(props: NumberFieldProps) {
+  const { label, value, onChange, min = 0, max, step = 1 } = props;
+  const limit = max ?? Number.MAX_SAFE_INTEGER; // beyond it a number cannot be exact
   const [text, setText] = useState(String(value));
   const [shown, setShown] = useState(value);
   if (value !== shown) {
@@ -84,12 +106,13 @@ export function NumberField(props: {
         <input
           id={id}
           type="number"
-          min={0}
-          step={1}
+          min={min}
+          max={max}
+          step={step}
           value={text}
           onChange={(e) => {
             setText(e.target.value);
-            const typed = wholeNumber(e.target.value);
+            const typed = storableNumber(e.target.value, min, limit, step);
             if (typed !== null && typed !== value) onChange(typed);
           }}
           onBlur={() => setText(String(value))}
