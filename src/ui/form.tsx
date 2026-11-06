@@ -7,19 +7,24 @@ import type { Choice } from './text';
 /** A plain number: digits, and digits after a point. No sign, no exponent, nothing to the side. */
 const PLAIN_NUMBER = /^\d+(\.\d+)?$/;
 
-/** How far a count of steps may be from a whole number and still be one (0.1 is not exact). */
-const STEP_TOLERANCE = 1e-9;
-
 /**
  * The number that the text is, if it may be stored: a plain number within `min` and `max` that
- * lies on the step, counted from `min`. Otherwise null.
+ * lies on the step, counted from `min`. Otherwise null. The count of steps has to be exactly a
+ * whole number: a number a hair off the step is not on it. So the step has to be one that a
+ * binary number holds exactly (1, 0.5, 0.25): the division by a step of 0.1 is not exact, and a
+ * good number such as 0.3 would be refused.
  */
-function storableNumber(text: string, min: number, max: number, step: number): number | null {
+export function storableNumber(
+  text: string,
+  min: number,
+  max: number,
+  step: number,
+): number | null {
   if (!PLAIN_NUMBER.test(text)) return null;
   const n = Number(text);
   if (n < min || n > max) return null;
   const steps = (n - min) / step;
-  return Math.abs(steps - Math.round(steps)) < STEP_TOLERANCE ? n : null;
+  return steps === Math.round(steps) ? n : null;
 }
 
 /**
@@ -79,7 +84,11 @@ interface NumberFieldProps {
   min?: number;
   /** The most it takes. Default: no limit, but the number has to be one that stays exact. */
   max?: number;
-  /** The distance between the numbers it takes, counted from `min`. Default 1: whole numbers. */
+  /**
+   * The distance between the numbers it takes, counted from `min`. Default 1: whole numbers. A
+   * number a hair off the step is not taken. It has to be a step that a binary number holds
+   * exactly: 1, 0.5, 0.25.
+   */
   step?: number;
 }
 

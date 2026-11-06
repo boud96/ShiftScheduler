@@ -78,7 +78,8 @@ function renderRules(data: AppData | null = newAppData()) {
 
 // The numbers of the screen, as the brief gives them. `stored` is what a new plan holds, `valid`
 // numbers inside the range that differ from it, and `invalid` ones the box must not store. `1e1`
-// is ten to a browser, so in range for each box, but it is not a plain number.
+// is ten to a browser, so in range for each box, but it is not a plain number. A number a hair off
+// the step, such as 20.0000000001, is no number on the step.
 const NUMBERS = [
   {
     label: 'Odpočinek mezi směnami (h)',
@@ -88,7 +89,10 @@ const NUMBERS = [
     step: 0.5,
     stored: 12,
     valid: ['8', '8.5', '10', '10.5', '24'],
-    invalid: ['7.5', '7', '24.5', '25', '100', '10.25', '10.3', '-10', '1e1'],
+    invalid: [
+      '7.5', '7', '24.5', '25', '100', '10.25', '10.3', '-10', '1e1',
+      '12.0000000001', '11.9999999999', '10.4999999999', '10.5000000001', // a hair off the step
+    ],
   },
   {
     label: 'Max. 12h směn za měsíc',
@@ -98,7 +102,7 @@ const NUMBERS = [
     step: 1,
     stored: 3,
     valid: ['1', '5', '10'],
-    invalid: ['0', '11', '2.5', '-1', '1e1'],
+    invalid: ['0', '11', '2.5', '-1', '1e1', '3.0000000001', '2.9999999999'],
   },
   {
     label: 'Cíl 12h směn za měsíc',
@@ -108,7 +112,7 @@ const NUMBERS = [
     step: 1,
     stored: 2,
     valid: ['0', '4', '10'],
-    invalid: ['11', '1.5', '-1', '1e1'],
+    invalid: ['11', '1.5', '-1', '1e1', '2.0000000001', '1.9999999999'],
   },
   {
     label: 'Čas na generování (s)',
@@ -118,7 +122,7 @@ const NUMBERS = [
     step: 1,
     stored: 20,
     valid: ['3', '45', '120'],
-    invalid: ['2', '121', '30.5', '-5', '1e1'],
+    invalid: ['2', '121', '30.5', '-5', '1e1', '20.0000000001', '19.9999999999'],
   },
 ] as const satisfies ReadonlyArray<{
   label: string;

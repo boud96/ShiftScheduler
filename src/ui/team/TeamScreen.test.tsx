@@ -511,6 +511,24 @@ describe('the numbers', () => {
     expect(box).toHaveValue(2);
   });
 
+  it('do not store a number a hair off a whole number', async () => {
+    renderTeam(team(2));
+    for (const [label, text] of [
+      ['Dovolená / rok', '25.0000000001'],
+      ['MyDay / rok', '4.9999999999'],
+      ['Noční směny', '2.0000000001'],
+    ] as const) {
+      const box = field(label);
+      await enter(box, text);
+      expect(Object.values(people()[0].allowance).every(Number.isInteger)).toBe(true);
+      expect(Object.values(people()[0].startingCounts).every(Number.isInteger)).toBe(true);
+      await userEvent.tab();
+      expect(Number.isInteger(Number((box as HTMLInputElement).value))).toBe(true);
+    }
+    expect(people()[0].allowance).toEqual({ DOV: 25, MD: 4 }); // the whole numbers on the way
+    expect(people()[0].startingCounts.nights).toBe(2);
+  });
+
   it('show the numbers of another plan that is opened for the same people', async () => {
     renderTeam(team(2));
     await userEvent.clear(field('Dovolená / rok')); // a box that waits for a number
