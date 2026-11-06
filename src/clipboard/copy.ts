@@ -4,7 +4,10 @@
  * It asks the Clipboard API first. A page that is not a secure context has no
  * `navigator.clipboard`, and a browser may refuse a write, so then the text is put in a textarea
  * that is out of sight, selected there, and copied with the copy command. Both ways need a fresh
- * click, so call it from the click itself, before anything is awaited.
+ * click, so call it from the click itself. The Clipboard API is asked before anything is awaited.
+ * The copy command runs after the refusal of the API has been awaited, so it relies on the click
+ * still counting as fresh by then: in Chromium it does for about 5 s after the click, in Firefox
+ * for less.
  */
 export async function copyText(text: string): Promise<boolean> {
   try {

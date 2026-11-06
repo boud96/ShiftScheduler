@@ -28,7 +28,7 @@ The end-to-end specs are in `tests/e2e`:
 - `smoke.spec.ts`: the built file is a single file and opens from disk without any request.
 - `csp.spec.ts`: the built page carries the Content-Security-Policy, and the browser enforces it. A `fetch` from the page is blocked and nothing leaves.
 - `grid-colours.spec.ts`: in a new plan, the gaps in the coverage row are red on the grey weekend columns too, and the hours below FPD are red. Only a browser tells which of two style rules wins, so jsdom cannot do this.
-- `plan-january.spec.ts`: starts a new plan and plans January 2027 with the real generator, in its worker, from the built file. Every day must be covered, `Kontrola` (Checks) must report no broken must, and no request and no policy violation may occur. It takes a few seconds, since the run has a time budget of 5 s.
+- `plan-january.spec.ts`: starts a new plan and plans January 2027 with the real generator, in its worker, from the built file. Every day must be covered, `Kontrola` (Checks) must report no broken must, no request may leave, and no policy violation may show on the page (the spec sees only the page's own violations: one inside the generator's worker is blocked all the same, but not reported to it). It takes a few seconds, since the run has a time budget of 5 s.
 
 ## Deliver a build
 
