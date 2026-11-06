@@ -137,7 +137,7 @@ function unloved(ctx: MonthContext, persons: PersonStats[], sink?: Sink): number
     const penalty = spread(people, sum, squares) * weight;
     score += penalty;
     if (sink !== undefined && penalty > 0) {
-      const message = `${name} rozdělené nerovnoměrně mezi ty, kdo ji nemají rádi`;
+      const message = `směny ${name} rozdělené nerovnoměrně mezi ty, kdo je nemají rádi`;
       report(sink, 'W8', null, [], message, penalty);
     }
   }

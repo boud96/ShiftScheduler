@@ -238,7 +238,7 @@ describe('W8 in detail', () => {
       severity: 'wish',
       person: null,
       days: [],
-      message: 'O rozdělené nerovnoměrně mezi ty, kdo ji nemají rádi',
+      message: 'směny O rozdělené nerovnoměrně mezi ty, kdo je nemají rádi',
     });
     expect(penalty / c.weights.W8).toBeCloseTo(96 / 9, 12);
   });
@@ -262,8 +262,8 @@ describe('W8 in detail', () => {
     // N: counts 1 and 0, the mean is 0.5, so 0.25 + 0.25
     const fs = found(c, 'W8', ['R1 R1 - N', '']);
     expect(fs.map((f) => [f.message, f.penalty / c.weights.W8])).toEqual([
-      ['R1 rozdělené nerovnoměrně mezi ty, kdo ji nemají rádi', 2],
-      ['N rozdělené nerovnoměrně mezi ty, kdo ji nemají rádi', 0.5],
+      ['směny R1 rozdělené nerovnoměrně mezi ty, kdo je nemají rádi', 2],
+      ['směny N rozdělené nerovnoměrně mezi ty, kdo je nemají rádi', 0.5],
     ]);
   });
   it('asks nothing when the shift is spread evenly or not worked at all', () => {
@@ -435,7 +435,7 @@ describe('the global wishes W7 to W9 together', () => {
     const w7 = rules(ev, 'W7');
     expect(w7.some((f) => f.quiet === true)).toBe(true);
     expect(w7.some((f) => f.quiet === undefined)).toBe(true);
-    expect(rules(ev, 'W8').map((f) => f.message.split(' ')[0])).toEqual(['O', 'N']);
+    expect(rules(ev, 'W8').map((f) => f.message.split(' ')[1])).toEqual(['O', 'N']);
     expect(rules(ev, 'W8').every((f) => f.quiet === undefined)).toBe(true);
     const w9 = rules(ev, 'W9');
     expect(w9.map((f) => [f.message, f.quiet])).toEqual([
@@ -669,13 +669,13 @@ describe('the global wishes on rows of any kind', () => {
       const w8 = seen.filter((f) => f.rule === 'W8');
       const uneven = SHIFTS.filter((name, k) =>
         squares(dislike(ctx, name).map((p) => persons[p].perShift[k])) > 0);
-      expect(w8.map((f) => f.message.split(' ')[0])).toEqual(uneven);
+      expect(w8.map((f) => f.message.split(' ')[1])).toEqual(uneven);
       for (const f of w8) {
         expect(f.severity).toBe('wish');
         expect(f.person).toBeNull();
         expect(f.days).toEqual([]);
         expect(f.quiet).toBeUndefined();
-        expect(f.message).toMatch(/^\S+ rozdělené nerovnoměrně mezi ty, kdo ji nemají rádi$/);
+        expect(f.message).toMatch(/^směny \S+ rozdělené nerovnoměrně mezi ty, kdo je nemají rádi$/);
         fired.w8++;
       }
 

@@ -194,7 +194,7 @@ function rhythm(ctx: MonthContext, p: number, row: Uint8Array, sink?: Sink): num
           const penalty = W3;
           score += penalty;
           if (sink !== undefined && penalty > 0) {
-            const message = `po ${fmtDays(before)} práce jen 1 den volna`;
+            const message = `po ${before} dnech práce jen 1 den volna`;
             report(sink, 'W3', p, span(prevStart, s), message, penalty);
           }
         }

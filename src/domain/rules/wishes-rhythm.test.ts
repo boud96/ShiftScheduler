@@ -224,7 +224,7 @@ describe('W3 in detail', () => {
   });
   it('adds a unit when 5 days of work are followed by 1 day off and more work', () => {
     expect(listed(found('W3', `${five} - R1`))).toEqual([
-      { message: 'po 5 dní práce jen 1 den volna', days: range(0, 6), units: 1 },
+      { message: 'po 5 dnech práce jen 1 den volna', days: range(0, 6), units: 1 },
     ]);
     expect(u('R1 R1 R1 R1 - R1', 'W3')).toBe(0); // only 4 days
     expect(u(`${five} - - R1`, 'W3')).toBe(0); // 2 days off
@@ -233,7 +233,7 @@ describe('W3 in detail', () => {
   it('adds 3 for a day off between stretches that make 12 days or more', () => {
     expect(listed(found('W3', `${six} - ${six}`))).toEqual([
       { message: '12 pracovních dní jen s jedním dnem volna', days: range(0, 12), units: 3 },
-      { message: 'po 6 dní práce jen 1 den volna', days: range(0, 7), units: 1 },
+      { message: 'po 6 dnech práce jen 1 den volna', days: range(0, 7), units: 1 },
     ]);
     expect(u(`${six} - ${five}`, 'W3')).toBe(1); // 6 + 5 = 11: only the unit for the 6 days
   });
@@ -262,7 +262,7 @@ describe('W3 in detail', () => {
   it('counts a day off at the turn of the month against the work after it', () => {
     const tail = ['- R1 R1 R1 R1 R1 -'];
     expect(listed(found('W3', `${five} R1`, tail))).toEqual([
-      { message: 'po 5 dní práce jen 1 den volna', days: range(-6, 0), units: 1 },
+      { message: 'po 5 dnech práce jen 1 den volna', days: range(-6, 0), units: 1 },
     ]);
     // 7 days of work after the day off: 1 for the length, 1 for the day off, 3 for 5 + 7 = 12
     expect(units(run(c, rowsOf(c, [`${five} R1 R1`], tail)), c, 'W3')).toBe(1 + 1 + 3);

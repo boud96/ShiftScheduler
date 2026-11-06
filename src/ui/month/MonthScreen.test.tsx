@@ -1076,7 +1076,7 @@ describe('Kontrola', () => {
     put(data, MONDAY, 'A', 'O20');
     put(data, '2027-01-05', 'A', 'O20');
     renderMonth(data);
-    expect(lines()).toEqual(['O20 rozdělené nerovnoměrně mezi ty, kdo ji nemají rádi']);
+    expect(lines()).toEqual(['směny O20 rozdělené nerovnoměrně mezi ty, kdo je nemají rádi']);
     expect(checks().getByText('Musí: 0 · Přání: 1')).toBeInTheDocument();
   });
 
