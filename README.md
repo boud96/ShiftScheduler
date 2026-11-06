@@ -70,6 +70,7 @@ The automated tests cannot cover other browsers, the operating system's dialogs 
 - Copying a row works through the Clipboard API.
 - Saving to a file and auto-save work: `Uložit do souboru` writes the file you picked, and later changes reach it by themselves.
 - That includes `requestPermission` after a slow file pick. Open a file and take more than 5 s in the picker, so that the click is no longer fresh when the page asks for write access. Check that the page can still write to the file, or says plainly that it cannot.
+- A file that refuses write access, or cannot be written to, is given up: move or delete the file you are saving to, or refuse the question about write access, and press `Uložit do souboru` (Save to file). The page opens the save picker in its place, and if you cancel it, the next press opens the picker at once. Answering the question very slowly may make the browser refuse the picker: the message `Soubor se nepodařilo uložit.` (The file could not be saved.) shows, and the next press works.
 
 **Czech decimal comma**
 

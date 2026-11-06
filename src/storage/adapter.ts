@@ -4,21 +4,54 @@ import { parseSaveFile, serialize } from './saveFile';
 /**
  * Where the app keeps its data. The save file is the real store; browser storage is only a cache
  * of it. The app always calls these through the object, so a test may replace any of them.
+ *
+ * Which file the data goes to is the adapter's state: the one opened or saved to last. Only a click
+ * of the user may make a browser show a picker or ask for write permission, so `openFile` and
+ * `saveFile` are to be called from one.
  */
 export interface StorageAdapter {
   /** The cached data, or null when there is none or it is no good. Never changes the cache. */
   loadCache(): AppData | null;
   /** Keeps the data in the cache. Never throws. */
   saveCache(d: AppData): void;
-  /** The name of the file the data goes to, if there is one. */
+  /**
+   * The name of the file the data goes to: the file held, else the last one opened or downloaded
+   * (Firefox, which holds no file), else null.
+   */
   fileName(): string | null;
-  /** Whether `autoSave` can write to the file now, without asking the user. */
+  /**
+   * Whether `autoSave` can write to the file now without asking the user: a file is held and it
+   * was last found writable. It turns false when a write to the file fails, and when `saveFile`
+   * gives the file up; a `saveFile` or an `openFile` that gets write access turns it on again.
+   */
   canAutoSave(): boolean;
-  /** Lets the user pick a save file. Null if they cancel; a bad file rejects with SaveFileError. */
+  /**
+   * Lets the user pick a save file and resolves with its data. From then on `fileName` and
+   * `autoSave` are for that file, and it is asked for write access at once. Resolves null, and
+   * changes nothing, when the user cancels. Rejects with a `SaveFileError` for a file that is not
+   * a plan (the file held before stays), or with the browser's error when the picker or reading
+   * fails.
+   */
   openFile(): Promise<AppData | null>;
-  /** Saves to the file, or downloads it. Resolves with the file name. Call it from a click. */
+  /**
+   * Saves to the file held, asking for write access if it has none, or lets the user pick a file
+   * (Edge, Chrome), or downloads one (Firefox). Resolves with the name of the file.
+   *
+   * When access to the file held is refused, or writing to it fails (it was moved, deleted, the
+   * disk is full), the file is given up and the picker opens in its place, as if none were held.
+   * It is given up before the picker opens: the question about access can take so long that the
+   * click is spent and the browser refuses the picker, and the click after that must find no file
+   * held and go straight to the picker.
+   *
+   * Rejects with an `AbortError` when the user cancels the picker (nothing is saved, and the file
+   * given up stays given up), and with the browser's error when the picker or the write to the
+   * file picked fails. Nothing in the error is for the user to read: the caller words it.
+   */
   saveFile(d: AppData): Promise<string>;
-  /** Writes to the file without asking. On failure it rejects and `canAutoSave` turns false. */
+  /**
+   * Writes to the file held without asking. Rejects when no file can be written to by itself; on a
+   * failed write it rejects with the error and `canAutoSave` turns false, until a `saveFile`.
+   */
   autoSave(d: AppData): Promise<void>;
 }
 
@@ -138,8 +171,10 @@ function download(text: string): void {
  * download, and `canAutoSave` is never true.
  */
 export function browserStorage(): StorageAdapter {
-  // The file saved to, and whether it may be written to without asking. It is replaced as a
-  // whole, so a late answer about an earlier file cannot change the permission of the current one.
+  // The file saved to, and whether it may be written to without asking. `writable` is changed in
+  // place, by the calls that learn of it. Each of them keeps the object it started with and writes
+  // `writable` there, so that a late answer about an earlier file cannot change the permission of
+  // the file held by then, which is another object.
   let held: { handle: FileHandle; writable: boolean } | null = null;
   // The last file opened or downloaded, for where there is no handle: no File System Access.
   let lastName: string | null = null;
@@ -200,12 +235,20 @@ export function browserStorage(): StorageAdapter {
       const text = serialize(d);
       const target = held;
       if (target) {
-        if (!(await hasWriteAccess(target.handle))) {
-          throw new DOMException('Write access to the file was refused.', 'NotAllowedError');
+        if (await hasWriteAccess(target.handle)) {
+          try {
+            await writeTo(target.handle, text);
+            target.writable = true;
+            return target.handle.name;
+          } catch {
+            // The file cannot be written to: it is dealt with as a refusal is.
+          }
         }
-        await writeTo(target.handle, text);
-        target.writable = true;
-        return target.handle.name;
+        // The file is given up. Before the picker opens, not after: the question about access
+        // may have taken so long that this click is spent, and the picker then fails. The click
+        // after it has to find no file held and open the picker at once. A file that was opened
+        // while the question was open is not this one, and stays.
+        if (held === target) held = null;
       }
 
       const w = pickers();

@@ -374,8 +374,10 @@ describe('browserStorage with File System Access: openFile', () => {
     const opening = openThrough(s, open, b);
     await wasAsked;
 
-    // A debounced auto-save of the old data fires meanwhile, and b must not get it.
-    await s.autoSave(plan(3)).catch(() => undefined);
+    // A debounced auto-save of the old data fires meanwhile: a is still the file held, so it goes
+    // to a, and b must not get it.
+    await s.autoSave(plan(3));
+    expect(a.state.writes).toEqual([serialize(plan(3))]);
     expect(b.state.writes).toEqual([]);
     expect(b.handle.createWritable).not.toHaveBeenCalled();
 
@@ -441,17 +443,180 @@ describe('browserStorage with File System Access: saveFile', () => {
     expect(s.canAutoSave()).toBe(true);
   });
 
-  it('writes nothing and rejects with NotAllowedError when the user refuses', async () => {
-    const { open } = stubPickers();
-    const a = fileOf('a.json', plan(1), { permission: 'denied' });
-    const s = browserStorage();
-    await openThrough(s, open, a);
+  describe('when the file held refuses write access or cannot be written to', () => {
+    /** Opens a file with the permission `permission` and `answer` to a question, then picks `next`. */
+    async function heldFile(init: { permission?: Permission; answer?: Permission } = {}) {
+      const pickers = stubPickers();
+      const a = fileOf('a.json', plan(1), init);
+      const s = browserStorage();
+      await openThrough(s, pickers.open, a);
+      return { ...pickers, a, s };
+    }
 
-    const failure = await s.saveFile(plan(2)).catch((e: unknown) => e);
-    expect((failure as DOMException).name).toBe('NotAllowedError');
-    expect(a.handle.createWritable).not.toHaveBeenCalled();
-    expect(s.fileName()).toBe('a.json');
-    expect(s.canAutoSave()).toBe(false);
+    it('forgets the file and shows the save picker when the user refuses access', async () => {
+      const { save, a, s } = await heldFile({ permission: 'denied' });
+      const b = fakeHandle('druhy.json');
+      save.mockResolvedValueOnce(b.handle);
+
+      expect(await s.saveFile(plan(2))).toBe('druhy.json');
+      expect(a.handle.createWritable).not.toHaveBeenCalled();
+      expect(save).toHaveBeenCalledTimes(1);
+      expect(save).toHaveBeenCalledWith(expect.objectContaining({ suggestedName: FILE_NAME }));
+      expect(b.state.writes).toEqual([serialize(plan(2))]);
+      expect(s.fileName()).toBe('druhy.json');
+      expect(s.canAutoSave()).toBe(true);
+      await s.autoSave(plan(3)); // the new file is the one auto-saved to
+      expect(b.state.writes).toEqual([serialize(plan(2)), serialize(plan(3))]);
+      expect(a.state.writes).toEqual([]);
+    });
+
+    it('asks for the permission first, and the picker is for a refusal only', async () => {
+      const { save, a, s } = await heldFile({ permission: 'prompt', answer: 'granted' });
+      a.state.permission = 'prompt'; // lost since the open
+      a.handle.requestPermission.mockClear();
+      expect(await s.saveFile(plan(2))).toBe('a.json');
+      expect(a.handle.requestPermission).toHaveBeenCalledTimes(1);
+      expect(save).not.toHaveBeenCalled();
+    });
+
+    it('drops the file before the picker opens, not after it', async () => {
+      const { save, s } = await heldFile({ permission: 'denied' });
+      let held: { name: string | null; auto: boolean } | undefined;
+      save.mockImplementationOnce(async () => {
+        held = { name: s.fileName(), auto: s.canAutoSave() }; // as the picker opens
+        return fakeHandle('druhy.json').handle;
+      });
+      await s.saveFile(plan(2));
+      expect(held).toEqual({ name: null, auto: false });
+    });
+
+    it('rejects with the AbortError of a cancelled picker, holding no file, and asks nothing next time', async () => {
+      const { save, a, s } = await heldFile({ permission: 'denied' });
+      const cancelled = abortError();
+      save.mockRejectedValueOnce(cancelled);
+      await expect(s.saveFile(plan(2))).rejects.toBe(cancelled);
+      expect(s.fileName()).toBeNull();
+      expect(s.canAutoSave()).toBe(false);
+
+      // The next click goes straight to the picker: a is not asked about again.
+      a.handle.queryPermission.mockClear();
+      a.handle.requestPermission.mockClear();
+      const b = fakeHandle('druhy.json');
+      save.mockResolvedValueOnce(b.handle);
+      expect(await s.saveFile(plan(3))).toBe('druhy.json');
+      expect(save).toHaveBeenCalledTimes(2);
+      expect(a.handle.queryPermission).not.toHaveBeenCalled();
+      expect(a.handle.requestPermission).not.toHaveBeenCalled();
+      expect(b.state.writes).toEqual([serialize(plan(3))]);
+    });
+
+    it('goes to the picker after a slow answer too, and the click that follows is the picker alone', async () => {
+      // The user took long to answer the question, so the click was spent when the picker was
+      // called, and the browser refused it. The file is forgotten all the same.
+      const { save, a, s } = await heldFile({ permission: 'prompt', answer: 'denied' });
+      a.state.permission = 'prompt';
+      let answer: (permission: Permission) => void = () => undefined;
+      a.handle.requestPermission.mockImplementationOnce(
+        () => new Promise<Permission>((resolve) => { answer = resolve; }),
+      );
+      const refused = new DOMException('Must be handling a user gesture.', 'SecurityError');
+      save.mockRejectedValueOnce(refused);
+
+      const saving = s.saveFile(plan(2));
+      const outcome = saving.catch((e: unknown) => e);
+      await Promise.resolve(); // the question is on the screen
+      expect(save).not.toHaveBeenCalled();
+      answer('denied'); // a long time later
+      expect(await outcome).toBe(refused);
+      expect(s.fileName()).toBeNull();
+
+      a.handle.requestPermission.mockClear();
+      save.mockResolvedValueOnce(fakeHandle('druhy.json').handle);
+      expect(await s.saveFile(plan(3))).toBe('druhy.json');
+      expect(a.handle.requestPermission).not.toHaveBeenCalled();
+    });
+
+    it('goes to the picker when the permission cannot be asked for', async () => {
+      const { save, a, s } = await heldFile({ permission: 'prompt' });
+      a.state.permission = 'prompt';
+      a.state.requestError = new DOMException('Needs a click.', 'SecurityError');
+      save.mockResolvedValueOnce(fakeHandle('druhy.json').handle);
+      expect(await s.saveFile(plan(2))).toBe('druhy.json');
+      expect(a.handle.createWritable).not.toHaveBeenCalled();
+    });
+
+    it('goes to the picker when the file cannot be written to, and lets go of the writer', async () => {
+      const { save, a, s } = await heldFile();
+      a.state.writeError = new DOMException('The file is gone.', 'NotFoundError');
+      const b = fakeHandle('druhy.json');
+      save.mockResolvedValueOnce(b.handle);
+
+      expect(await s.saveFile(plan(2))).toBe('druhy.json');
+      expect(a.state.writers).toHaveLength(1);
+      expect(a.state.writers[0].abort).toHaveBeenCalledTimes(1);
+      expect(a.state.writes).toEqual([]);
+      expect(b.state.writes).toEqual([serialize(plan(2))]);
+      expect(s.fileName()).toBe('druhy.json');
+      expect(s.canAutoSave()).toBe(true);
+    });
+
+    it('forgets a file that cannot be written to, also when the picker is cancelled', async () => {
+      const { save, a, s } = await heldFile();
+      a.state.writeError = new DOMException('The file is gone.', 'NotFoundError');
+      const cancelled = abortError();
+      save.mockRejectedValueOnce(cancelled);
+      await expect(s.saveFile(plan(2))).rejects.toBe(cancelled);
+      expect(s.fileName()).toBeNull();
+      expect(s.canAutoSave()).toBe(false);
+
+      a.handle.createWritable.mockClear();
+      save.mockResolvedValueOnce(fakeHandle('druhy.json').handle);
+      expect(await s.saveFile(plan(3))).toBe('druhy.json');
+      expect(a.handle.createWritable).not.toHaveBeenCalled(); // not even tried
+    });
+
+    it('holds nothing when the file picked in its place cannot be written to either', async () => {
+      const { save, s } = await heldFile({ permission: 'denied' });
+      const b = fakeHandle('druhy.json');
+      b.state.writeError = new DOMException('Disk full.', 'QuotaExceededError');
+      save.mockResolvedValueOnce(b.handle);
+      await expect(s.saveFile(plan(2))).rejects.toBe(b.state.writeError);
+      expect(s.fileName()).toBeNull();
+      expect(s.canAutoSave()).toBe(false);
+    });
+
+    it('leaves auto-saving off, until a save puts a file back', async () => {
+      const { save, s } = await heldFile({ permission: 'denied' });
+      save.mockRejectedValueOnce(abortError());
+      await s.saveFile(plan(2)).catch(() => undefined);
+      await expect(s.autoSave(plan(3))).rejects.toThrow();
+      const b = fakeHandle('druhy.json');
+      save.mockResolvedValueOnce(b.handle);
+      await s.saveFile(plan(4));
+      await s.autoSave(plan(5));
+      expect(b.state.writes).toEqual([serialize(plan(4)), serialize(plan(5))]);
+    });
+
+    it('does not let go of a file that was opened meanwhile', async () => {
+      const { open, save, a, s } = await heldFile({ permission: 'prompt', answer: 'denied' });
+      a.state.permission = 'prompt';
+      let answer: (permission: Permission) => void = () => undefined;
+      a.handle.requestPermission.mockImplementationOnce(
+        () => new Promise<Permission>((resolve) => { answer = resolve; }),
+      );
+      const saving = s.saveFile(plan(2)).catch((e: unknown) => e);
+      await Promise.resolve();
+
+      await openThrough(s, open, fileOf('b.json', plan(3))); // while the question is open
+      expect(s.fileName()).toBe('b.json');
+      const cancelled = abortError();
+      save.mockRejectedValueOnce(cancelled);
+      answer('denied');
+      expect(await saving).toBe(cancelled);
+      // b is the file held, and the refusal of a was not about it
+      expect(s.fileName()).toBe('b.json');
+      expect(s.canAutoSave()).toBe(true);
+    });
   });
 
   it('rejects with the very AbortError of a cancelled picker, and saves nothing', async () => {
