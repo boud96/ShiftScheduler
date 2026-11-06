@@ -795,6 +795,68 @@ describe('the totals of a person', () => {
     expect(screen.getByTestId('totals-A')).toHaveTextContent(/^0 \/ 157,5 /);
   });
 
+  describe('mark the hours in red when they are below FPD', () => {
+    /** The hours of person `id`: the `Hodiny / FPD` figure of the totals. */
+    const hours = (id: PersonId) => within(screen.getByTestId(`totals-${id}`)).getByTitle('Hodiny / FPD');
+
+    it('and only then: not at the FPD, not above it', () => {
+      const data = plan(3);
+      data.months['2027-01'] = { status: 'draft', hoursAdjust: { A: -150, B: -150, C: -150 } }; // FPD 7,5 h
+      put(data, MONDAY, 'A', 'R1'); // 7,5 h: the FPD exactly
+      put(data, MONDAY, 'B', 'R1');
+      put(data, '2027-01-05', 'B', 'R2'); // 15 h: over it
+      renderMonth(data); // C has nothing: 0 h
+      expect(hours('A')).toHaveTextContent('7,5 / 7,5');
+      expect(hours('A')).not.toHaveClass('below-fpd');
+      expect(hours('B')).not.toHaveClass('below-fpd');
+      expect(hours('C')).toHaveTextContent('0 / 7,5');
+      expect(hours('C')).toHaveClass('below-fpd');
+    });
+
+    it('as the rule M6 does, which no cell shows: the hours, not a cell, turn red', () => {
+      renderMonth(plan(2)); // both are below FPD, and Kontrola lists M6 for both
+      expect(checks().getAllByRole('button', { name: /do FPD$/ })).toHaveLength(2);
+      expect(hours('A')).toHaveClass('below-fpd');
+      expect(hours('B')).toHaveClass('below-fpd');
+      expect(document.querySelectorAll('.month-cell.must')).toHaveLength(0);
+    });
+
+    it('with each edit', async () => {
+      const data = plan(1);
+      data.months['2027-01'] = { status: 'draft', hoursAdjust: { A: -150 } }; // FPD 7,5 h
+      renderMonth(data);
+      expect(hours('A')).toHaveClass('below-fpd');
+      await choose('A', MONDAY, 'R1');
+      expect(hours('A')).not.toHaveClass('below-fpd');
+      await choose('A', MONDAY, 'Vymazat');
+      expect(hours('A')).toHaveClass('below-fpd');
+    });
+
+    it('not for a shortfall that is only the rounding of the sum, as M6 does not', () => {
+      // 20 shifts of 7.1 h add up to 141.99999999999994, and the fund of the month is 142
+      const data = plan(1);
+      data.settings.shifts.R1 = { ...data.settings.shifts.R1, hours: 7.1 };
+      data.settings.fpdHoursPerWeekday = 7.1;
+      for (let day = 1; day <= 28; day++) {
+        const date = `2027-02-${String(day).padStart(2, '0')}`;
+        const weekday = new Date(`${date}T00:00:00Z`).getUTCDay() % 6 !== 0; // not Sat, not Sun
+        if (weekday) put(data, date, 'A', 'R1');
+      }
+      renderMonth(data, '2027-02');
+      expect(hours('A')).toHaveTextContent('142 / 142');
+      expect(hours('A')).not.toHaveClass('below-fpd');
+      expect(checks().queryByText(/do FPD/)).toBeNull();
+    });
+
+    it('and the other figures of the totals stay as they were', () => {
+      renderMonth(plan(1));
+      const totals = screen.getByTestId('totals-A');
+      for (const title of ['Přesčas', '12h', 'Noci']) {
+        expect(within(totals).getByTitle(title)).not.toHaveClass('below-fpd');
+      }
+    });
+  });
+
   it('use the days that the person is in the team for the FPD', () => {
     const data = plan(2);
     data.people[1].activeFrom = '2027-01-15'; // Mon-Fri days from the 15th: 11 of them

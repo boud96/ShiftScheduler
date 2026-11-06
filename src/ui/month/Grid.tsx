@@ -4,6 +4,7 @@ import { CODE_NAMES, Code, WEEKDAY_CODES, isShift } from '../../domain/codes';
 import type { MonthContext, MonthGrid } from '../../domain/context';
 import { fmtH, shortDate } from '../../domain/format';
 import type { MonthEval } from '../../domain/rules/evaluate';
+import { FPD_TOLERANCE } from '../../domain/rules/personMusts';
 import type { Finding, PersonStats } from '../../domain/rules/types';
 import type { AppData, ISODate, PersonId } from '../../domain/types';
 import { MONTH_SCREEN, WEEKDAY_ABBREVIATIONS } from '../text';
@@ -42,14 +43,21 @@ function dayClasses(day: DayInfo): (string | false)[] {
   return [!day.inMonth && 'tail', day.dayType === 'twelve' && 'twelve'];
 }
 
-/** The totals of a person: hours against FPD, overtime, 12-hour shifts, nights, each shift. */
+/**
+ * The totals of a person: hours against FPD, overtime, 12-hour shifts, nights, each shift. The
+ * hours are red when they are below FPD: the finding of that (M6) names no day, so it marks no
+ * cell, and this figure is where it shows. It is below as M6 judges it, not by a rounding error.
+ */
 function Totals({ id, stats, fpd }: { id: PersonId; stats: PersonStats; fpd: number }) {
   const { totals } = MONTH_SCREEN;
   const shifts = WEEKDAY_CODES.map((code, k) => `${CODE_NAMES[code]} ${stats.perShift[k]}`);
+  const below = fpd - stats.hours > FPD_TOLERANCE;
   return (
     <td className="month-totals" data-testid={`totals-${id}`}>
       <div className="month-totals-grid">
-        <span title={totals.hours}>{`${fmtH(stats.hours)} / ${fmtH(fpd)}`}</span>{' '}
+        <span title={totals.hours} className={classes(below && 'below-fpd')}>
+          {`${fmtH(stats.hours)} / ${fmtH(fpd)}`}
+        </span>{' '}
         <span title={totals.overtime}>{fmtH(stats.hours - fpd)}</span>{' '}
         <span title={totals.twelve}>{stats.twelve}</span>{' '}
         <span title={totals.nights}>{stats.nights}</span>{' '}

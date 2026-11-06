@@ -564,6 +564,12 @@ h1 {
   text-align: left;
 }
 
+/* The hours of a person below their FPD: a must without a day, so no cell is red for it. */
+.month-totals-grid .below-fpd {
+  font-weight: 600;
+  color: var(--danger-text);
+}
+
 /* A cell, and an item of the menu of a cell: plain here, coloured by the code further down. */
 
 .month-cell {
@@ -718,7 +724,8 @@ h1 {
   vertical-align: top;
 }
 
-.month-coverage td.short {
+/* After the grey of a 12-hour day, and as specific: a gap on a Saturday is red, not grey. */
+.month-grid .month-coverage td.short {
   color: var(--danger-text);
   background: var(--danger-bg);
 }
