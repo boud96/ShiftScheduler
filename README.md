@@ -10,7 +10,7 @@ The design is in [`docs/superpowers/specs/2026-11-04-shift-scheduler-design.md`]
 
 ## Develop
 
-You need Node.js 22.12 or newer, on a long-term-support (even-numbered) release: Vite and Vitest require it.
+You need Node.js `^22.22.2 || ^24.15.0 || >=26`: 22.22.2 or newer on the 22 line, 24.15.0 or newer on the 24 line, or 26 and later. That is what jsdom, which runs the unit tests, asks for; Vite and Vitest accept less.
 
 | Command | What it does |
 |---|---|
