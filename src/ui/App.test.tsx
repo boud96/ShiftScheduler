@@ -12,7 +12,7 @@ import { inProcessRunner } from '../worker/runner';
 import { newAppData } from '../domain/defaults';
 import type { AppData } from '../domain/types';
 import { SaveFileError } from '../storage/saveFile';
-import { TAB_PANEL_SOON } from './text';
+import { PLAN_ERROR, TAB_PANEL_SOON } from './text';
 
 afterEach(() => {
   vi.restoreAllMocks(); // the spies
@@ -512,5 +512,122 @@ describe('errors', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Uložit do souboru' }));
     expect(await screen.findByText(/^Uloženo do souboru/)).toBeInTheDocument();
     expect(screen.queryByRole('alert')).toBeNull();
+  });
+});
+
+// --- A page that cannot be drawn -----------------------------------------------------------------
+
+describe('a page that cannot be drawn', () => {
+  const BROKEN = 'Rozbitý plán';
+
+  /** A screen that fails to draw while the first person has the broken name, as a bug would. */
+  function Fragile() {
+    const { data } = useApp();
+    if (data?.people[0].name === BROKEN) throw new Error('The plan cannot be drawn.');
+    return <p>Plán je vidět</p>;
+  }
+
+  function brokenPlan(): AppData {
+    const data = newAppData();
+    data.people[0].name = BROKEN;
+    return data;
+  }
+
+  /** The console, so that React's report of the caught error does not clutter the output. */
+  const quietConsole = () => vi.spyOn(console, 'error').mockImplementation(() => undefined);
+
+  const openButton = () => screen.getByRole('button', { name: 'Otevřít soubor' });
+  const newButton = () => screen.getByRole('button', { name: 'Začít nový' });
+
+  it('shows a message and the two ways out instead of a blank page', () => {
+    quietConsole();
+    renderApp(memoryStorage(brokenPlan()), { month: Fragile });
+    expect(screen.getByRole('alert')).toHaveTextContent(PLAN_ERROR.title);
+    expect(screen.getByText('Plán se nepodařilo zobrazit.')).toBeInTheDocument();
+    expect(screen.getByText(/Otevřete soubor s plánem, nebo začněte nový plán\./)).toBeInTheDocument();
+    expect(openButton()).toBeEnabled();
+    expect(newButton()).toBeEnabled();
+    expect(screen.getByRole('heading', { level: 1, name: 'Plánování směn' })).toBeInTheDocument();
+    expect(screen.queryByRole('tablist')).toBeNull();
+    expect(screen.queryByText('Plán je vidět')).toBeNull();
+  });
+
+  it('logs the error to the console', () => {
+    const log = quietConsole();
+    renderApp(memoryStorage(brokenPlan()), { month: Fragile });
+    const ours = log.mock.calls.filter(
+      ([first]) => typeof first === 'string' && first.startsWith('The plan could not be shown'),
+    );
+    expect(ours).toHaveLength(1);
+    expect(ours[0][1]).toEqual(new Error('The plan cannot be drawn.'));
+  });
+
+  it('draws the page again with a new plan: Začít nový', async () => {
+    quietConsole();
+    renderApp(memoryStorage(brokenPlan()), { month: Fragile });
+    await userEvent.click(newButton());
+    expect(screen.getByText('Plán je vidět')).toBeInTheDocument();
+    expect(screen.queryByRole('alert')).toBeNull();
+    expect(screen.getByRole('tab', { name: 'Měsíc' })).toBeInTheDocument();
+  });
+
+  it('draws the page again with the plan of a file: Otevřít soubor', async () => {
+    quietConsole();
+    const storage = memoryStorage(brokenPlan());
+    storage.openFile = async () => otherPlan();
+    renderApp(storage, { month: Fragile });
+    await userEvent.click(openButton());
+    expect(await screen.findByText('Plán je vidět')).toBeInTheDocument();
+    expect(screen.queryByText('Plán se nepodařilo zobrazit.')).toBeNull();
+  });
+
+  it('stays on the message when the file is not opened or is no good', async () => {
+    quietConsole();
+    const storage = memoryStorage(brokenPlan());
+    renderApp(storage, { month: Fragile });
+    await userEvent.click(openButton()); // memoryStorage opens nothing, as for a cancel
+    expect(screen.getByText('Plán se nepodařilo zobrazit.')).toBeInTheDocument();
+
+    storage.openFile = async () => {
+      throw new SaveFileError('Soubor je poškozený.');
+    };
+    await userEvent.click(openButton());
+    expect(await screen.findByText('Soubor je poškozený.')).toBeInTheDocument(); // the banner above
+    expect(screen.getByText('Plán se nepodařilo zobrazit.')).toBeInTheDocument();
+  });
+
+  it('draws the page again only when the data is replaced, not when it is changed', async () => {
+    quietConsole();
+    renderApp(memoryStorage(brokenPlan()), { month: Fragile });
+    await userEvent.click(screen.getByRole('button', { name: 'Změnit' })); // a change, no new data
+    expect(screen.getByText('Plán se nepodařilo zobrazit.')).toBeInTheDocument();
+    await userEvent.click(newButton());
+    expect(screen.getByText('Plán je vidět')).toBeInTheDocument();
+  });
+
+  it('can fail again after it has been put right, and offers the same ways out', async () => {
+    quietConsole();
+    const storage = memoryStorage(brokenPlan());
+    storage.openFile = async () => brokenPlan(); // a file that is just as broken
+    renderApp(storage, { month: Fragile });
+    await userEvent.click(openButton());
+    expect(await screen.findByText('Plán se nepodařilo zobrazit.')).toBeInTheDocument();
+    await userEvent.click(newButton());
+    expect(screen.getByText('Plán je vidět')).toBeInTheDocument();
+  });
+
+  it('catches a screen that is not the first, hidden or not', async () => {
+    quietConsole();
+    renderApp(memoryStorage(brokenPlan()), { rules: Fragile }); // the Pravidla panel is hidden
+    expect(screen.getByText('Plán se nepodařilo zobrazit.')).toBeInTheDocument();
+    expect(screen.queryByRole('tab', { name: 'Pravidla' })).toBeNull();
+  });
+
+  it('leaves a page that draws well alone', () => {
+    const log = quietConsole();
+    renderApp(memoryStorage(newAppData()), { month: Fragile });
+    expect(screen.getByText('Plán je vidět')).toBeInTheDocument();
+    expect(screen.queryByRole('alert')).toBeNull();
+    expect(log).not.toHaveBeenCalled();
   });
 });

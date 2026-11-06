@@ -47,6 +47,15 @@ export const START_SCREEN = {
   create: 'Začít nový',
 };
 
+/**
+ * What the page says when it cannot draw the plan. The ways out are the buttons of the start
+ * screen, `START_SCREEN`.
+ */
+export const PLAN_ERROR = {
+  title: 'Plán se nepodařilo zobrazit.',
+  hint: 'Otevřete soubor s plánem, nebo začněte nový plán.',
+};
+
 export const SAVE_BAR = {
   save: 'Uložit do souboru',
   open: 'Otevřít soubor',

@@ -1,8 +1,8 @@
 // src/storage/saveFile.test.ts
 import { describe, it, expect } from 'vitest';
 import { serialize, parseSaveFile, SaveFileError } from './saveFile';
-import { newAppData } from '../domain/defaults';
-import type { AppData } from '../domain/types';
+import { newAppData, newPerson } from '../domain/defaults';
+import type { AppData, Person } from '../domain/types';
 
 describe('save file', () => {
   it('round-trips', () => {
@@ -172,10 +172,166 @@ describe('parseSaveFile', () => {
       expect(errorWith(edit)).toBe(CORRUPT);
     });
 
-    it('accepts no people, an empty name, and the rest of a person as the app wrote it', () => {
+    it('accepts no people and an empty name, and completes a person from the defaults', () => {
       expect(parsedWith((raw) => { raw.people = []; }).people).toEqual([]);
       const people = [{ id: 'a', name: '' }, { id: 'b', name: 'B' }];
-      expect(parsedWith((raw) => { raw.people = people; }).people).toEqual(people);
+      expect(parsedWith((raw) => { raw.people = people; }).people)
+        .toEqual([newPerson('a', ''), newPerson('b', 'B')]);
+    });
+  });
+
+  // A person in the file may lack an entry that the app now has (an older file, a hand edit). The
+  // app builds a month straight from the person, so each entry is completed from newPerson(id,
+  // name) the way the settings are completed from the defaults, and no person is refused for it.
+  describe('a person', () => {
+    /** The first person of the sample plan, as the raw JSON of the file has it. */
+    const first = (raw: Raw): Raw => raw.people[0];
+    /** The people of the sample plan after `edit`, as parsed. */
+    const peopleWith = (edit: Edit): Person[] => parsedWith(edit).people;
+    const defaults = (): Person => newPerson('p1', 'Operátor 1');
+
+    /** A person with every entry set to something other than the default. */
+    function filledIn(): Person {
+      return {
+        id: 'p1',
+        name: 'Operátor 1',
+        activeFrom: '2027-01-10',
+        activeTo: '2027-12-31',
+        prefs: {
+          ratings: { R1: 5, O20: 1, N: 3 },
+          nights: 'never',
+          weekendStyle: 'single',
+          afterWeekend: 'want',
+          afterNights: ['R1', 'O'],
+          notes: 'Chce volné pondělky.',
+        },
+        allowance: { DOV: 20, MD: 3 },
+        startingCounts: { twelve: 2, nights: 4, holidayTwelve: 1, festive: 3 },
+      };
+    }
+
+    it('keeps every entry that the file has', () => {
+      const given = filledIn();
+      expect(peopleWith((raw) => { raw.people[0] = given; })[0]).toEqual(given);
+    });
+
+    it('is the defaults of newPerson when the file has only the id and the name', () => {
+      const parsed = peopleWith((raw) => { raw.people = [{ id: 'p1', name: 'Operátor 1' }]; });
+      expect(parsed).toEqual([defaults()]);
+    });
+
+    it.each(['prefs', 'allowance', 'startingCounts', 'activeFrom', 'activeTo'])(
+      'gets the default %s when the file has none', (entry) => {
+        const parsed = peopleWith((raw) => { delete first(raw)[entry]; });
+        expect(parsed[0]).toEqual(parsedWith(() => undefined).people[0]); // the others as they were
+        expect(parsed[0][entry as keyof Person]).toEqual(defaults()[entry as keyof Person]);
+      });
+
+    it.each([
+      ['null', null], ['a number', 7], ['a string', 'normal'], ['an array', []], ['true', true],
+    ])('takes prefs, allowance and startingCounts that are %s for missing', (_what, value) => {
+      const parsed = peopleWith((raw) => {
+        for (const entry of ['prefs', 'allowance', 'startingCounts']) first(raw)[entry] = value;
+      });
+      expect(parsed[0]).toEqual(defaults());
+    });
+
+    describe('prefs', () => {
+      it('are completed entry by entry', () => {
+        const parsed = peopleWith((raw) => { first(raw).prefs = { nights: 'never', notes: 'Pozn.' }; });
+        expect(parsed[0].prefs).toEqual({ ...defaults().prefs, nights: 'never', notes: 'Pozn.' });
+      });
+      it.each(['ratings', 'nights', 'weekendStyle', 'afterWeekend', 'afterNights', 'notes'])(
+        'get the default %s when the file lacks it', (entry) => {
+          const given = filledIn().prefs;
+          delete (given as unknown as Raw)[entry];
+          const parsed = peopleWith((raw) => { first(raw).prefs = given; });
+          expect(parsed[0].prefs[entry as keyof Person['prefs']])
+            .toEqual(defaults().prefs[entry as keyof Person['prefs']]);
+          // and what the file has stays
+          const kept = Object.keys(given) as Array<keyof Person['prefs']>;
+          for (const key of kept) expect(parsed[0].prefs[key]).toEqual(given[key]);
+        });
+      it('have ratings that are completed too: a missing or odd one is empty, a partial one stays', () => {
+        const ratingsOf = (ratings: unknown) =>
+          peopleWith((raw) => { first(raw).prefs = { ratings }; })[0].prefs.ratings;
+        expect(ratingsOf(undefined)).toEqual({});
+        for (const odd of [null, 5, 'R1', [], [1, 2], true]) expect(ratingsOf(odd)).toEqual({});
+        expect(ratingsOf({ R1: 5 })).toEqual({ R1: 5 }); // no rating is made up for the others
+        expect(ratingsOf({ R1: 5, N: 2 })).toEqual({ R1: 5, N: 2 });
+      });
+    });
+
+    describe('allowance and startingCounts', () => {
+      it('are completed entry by entry', () => {
+        const parsed = peopleWith((raw) => {
+          first(raw).allowance = { DOV: 12 };
+          first(raw).startingCounts = { nights: 6, festive: 2 };
+        });
+        expect(parsed[0].allowance).toEqual({ DOV: 12, MD: 5 });
+        expect(parsed[0].startingCounts).toEqual({ twelve: 0, nights: 6, holidayTwelve: 0, festive: 2 });
+      });
+    });
+
+    describe('activeFrom and activeTo', () => {
+      it.each(['2027-01-01', '2027-12-31', '2028-02-29', '2000-02-29'])(
+        'keep the real date %s', (date) => {
+          const parsed = peopleWith((raw) => { first(raw).activeFrom = date; first(raw).activeTo = date; });
+          expect([parsed[0].activeFrom, parsed[0].activeTo]).toEqual([date, date]);
+        });
+      it.each([
+        ['an impossible date', '2027-02-30'], ['a date out of form', '2027-1-4'],
+        ['a date with a time', '2027-01-04T00:00'], ['a month', '2027-01'], ['the empty text', ''],
+        ['text', 'zítra'], ['a number', 20270104], ['true', true], ['an array', ['2027-01-04']],
+        ['an object', { date: '2027-01-04' }], ['undefined', undefined],
+      ])('stay null for %s', (_what, value) => {
+        const parsed = peopleWith((raw) => {
+          first(raw).activeFrom = value;
+          first(raw).activeTo = value;
+        });
+        expect([parsed[0].activeFrom, parsed[0].activeTo]).toEqual([null, null]);
+      });
+      it('are judged one by one', () => {
+        const parsed = peopleWith((raw) => {
+          first(raw).activeFrom = '2027-03-01';
+          first(raw).activeTo = 'nikdy';
+        });
+        expect([parsed[0].activeFrom, parsed[0].activeTo]).toEqual(['2027-03-01', null]);
+      });
+    });
+
+    it('is judged person by person, and the order stays', () => {
+      const parsed = peopleWith((raw) => {
+        raw.people = [{ id: 'z', name: 'Z' }, filledIn(), { id: 'a', name: 'A', prefs: 5 }];
+      });
+      expect(parsed.map((p) => p.id)).toEqual(['z', 'p1', 'a']);
+      expect(parsed[0]).toEqual(newPerson('z', 'Z'));
+      expect(parsed[1]).toEqual(filledIn());
+      expect(parsed[2]).toEqual(newPerson('a', 'A'));
+    });
+
+    it('drops an entry that the app does not know', () => {
+      const parsed = peopleWith((raw) => { first(raw).futureThing = { a: 1 }; });
+      expect(Object.keys(parsed[0]).sort()).toEqual(
+        ['activeFrom', 'activeTo', 'allowance', 'id', 'name', 'prefs', 'startingCounts']);
+    });
+
+    it('is not shared between two parses, nor with the defaults', () => {
+      const text = fileWith((raw) => { raw.people = [{ id: 'p1', name: 'Operátor 1' }]; });
+      const a = parseSaveFile(text);
+      a.people[0].prefs.ratings.R1 = 5;
+      a.people[0].prefs.afterNights.push('R1');
+      a.people[0].allowance.DOV = 1;
+      a.people[0].startingCounts.twelve = 9;
+      expect(parseSaveFile(text).people[0]).toEqual(defaults());
+      expect(newPerson('p1', 'Operátor 1')).toEqual(defaults());
+    });
+
+    it('still has to have a name and a unique id', () => {
+      expect(errorWith((raw) => { raw.people = [{ id: 'a' }]; })).toBe(CORRUPT);
+      expect(errorWith((raw) => { raw.people = [{ name: 'A' }]; })).toBe(CORRUPT);
+      expect(errorWith((raw) => { raw.people = [{ id: 'a', name: 'A' }, { id: 'a', name: 'B' }]; }))
+        .toBe(CORRUPT);
     });
   });
 

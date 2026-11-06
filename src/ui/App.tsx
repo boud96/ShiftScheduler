@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import type { ComponentType } from 'react';
+import { ErrorBoundary, PlanError } from './ErrorBoundary';
 import { SaveBar } from './SaveBar';
 import { StartScreen } from './StartScreen';
 import { MonthScreen } from './month/MonthScreen';
@@ -85,13 +86,18 @@ function ErrorBanner({ message, onDismiss }: { message: string; onDismiss: () =>
 /**
  * The start screen while there is no data, the three tabs once there is. `screens` replaces the
  * screen of a tab. The page leaves it out; a test uses it to put in a screen with state of its own.
+ *
+ * A screen that fails to draw does not blank the page: a sentence and the buttons of the start
+ * screen take its place, until the data is replaced (a file is opened, a new plan is started).
  */
 export function App({ screens }: { screens?: Partial<Screens> }) {
-  const { data, error, dismissError } = useApp();
+  const { data, error, dismissError, loads } = useApp();
   return (
     <div className="app">
       {error !== null && <ErrorBanner message={error} onDismiss={dismissError} />}
-      {data === null ? <StartScreen /> : <Shell screens={{ ...SCREENS, ...screens }} />}
+      <ErrorBoundary resetKey={loads} fallback={<PlanError />}>
+        {data === null ? <StartScreen /> : <Shell screens={{ ...SCREENS, ...screens }} />}
+      </ErrorBoundary>
     </div>
   );
 }

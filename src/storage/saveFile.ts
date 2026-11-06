@@ -1,6 +1,6 @@
 import { CODE_NAMES } from '../domain/codes';
-import { defaultSettings } from '../domain/defaults';
-import type { AppData, Person, Settings } from '../domain/types';
+import { defaultSettings, newPerson } from '../domain/defaults';
+import type { AppData, ISODate, Person, Settings } from '../domain/types';
 
 /** The version of the save file format that this app writes and reads. */
 export const SCHEMA_VERSION = 1;
@@ -50,10 +50,11 @@ function isCalendarDate(text: string): boolean {
   );
 }
 
-const isPerson = (v: unknown): boolean =>
+/** The least a person must have to be one: an id of their own and a name. The rest is completed. */
+const isPerson = (v: unknown): v is Json & { id: string; name: string } =>
   isObject(v) && typeof v.id === 'string' && v.id !== '' && typeof v.name === 'string';
 
-const isPeople = (v: unknown): v is Person[] =>
+const isPeople = (v: unknown): v is Array<Json & { id: string; name: string }> =>
   Array.isArray(v) && v.every(isPerson) && new Set(v.map((p) => p.id)).size === v.length;
 
 const isStoredCell = (v: unknown): boolean =>
@@ -91,11 +92,45 @@ function completeSettings(given: Json): Settings {
 }
 
 /**
+ * The date if it is a real calendar date written `YYYY-MM-DD`, else null: the person is then in the
+ * team without a limit on that side.
+ */
+const dateOrNull = (v: unknown): ISODate | null =>
+  typeof v === 'string' && isCalendarDate(v) ? v : null;
+
+/**
+ * A person of a file, completed from the defaults of `newPerson` entry by entry, as the settings
+ * are: an entry the file lacks, or has as anything but what it should be (an object for `prefs`,
+ * `allowance`, `startingCounts` and the ratings), is taken from the defaults, and one that it has
+ * stays. The app builds a month straight from the person, so a person without `prefs` would bring
+ * the page down. `activeFrom` and `activeTo` are null unless they are real dates.
+ */
+function completePerson(given: Json & { id: string; name: string }): Person {
+  const defaults = newPerson(given.id, given.name);
+  const prefs = isObject(given.prefs) ? given.prefs : {};
+  return {
+    id: defaults.id,
+    name: defaults.name,
+    activeFrom: dateOrNull(given.activeFrom),
+    activeTo: dateOrNull(given.activeTo),
+    prefs: {
+      ...fillIn(defaults.prefs, prefs),
+      // The ratings are an entry of their own, and may hold only some of the shifts.
+      ratings: fillIn(defaults.prefs.ratings, prefs.ratings),
+    },
+    allowance: fillIn(defaults.allowance, given.allowance),
+    startingCounts: fillIn(defaults.startingCounts, given.startingCounts),
+  };
+}
+
+/**
  * Reads the text of a save file. It throws a `SaveFileError` for a file that is not a plan, one
  * from a newer version of the app, or one that is damaged. The checks are what the app relies on
  * when it builds a month: people with their own ids, cells on real dates holding real codes,
- * months with a status. Anything else is trusted as the app wrote it. Keys the app does not know
- * are dropped, so the result is exactly an `AppData`. A file the app wrote always passes.
+ * months with a status. A person is completed from the defaults where the file lacks an entry (see
+ * `completePerson`), and so are the settings. Anything else is trusted as the app wrote it. Keys
+ * the app does not know are dropped, so the result is exactly an `AppData`. A file the app wrote
+ * always passes.
  */
 export function parseSaveFile(text: string): AppData {
   let file: unknown;
@@ -121,7 +156,7 @@ export function parseSaveFile(text: string): AppData {
   }
   return {
     schemaVersion: SCHEMA_VERSION,
-    people,
+    people: people.map(completePerson),
     settings: completeSettings(settings),
     cells,
     months,

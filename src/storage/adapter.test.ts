@@ -3,7 +3,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { browserStorage, memoryStorage } from './adapter';
 import type { StorageAdapter } from './adapter';
 import { SaveFileError, parseSaveFile, serialize } from './saveFile';
-import { newAppData } from '../domain/defaults';
+import { newAppData, newPerson } from '../domain/defaults';
 import type { AppData } from '../domain/types';
 
 const CACHE_KEY = 'shift-scheduler/v1';
@@ -165,6 +165,24 @@ describe('browserStorage: the cache', () => {
     localStorage.setItem(CACHE_KEY, stored);
     expect(browserStorage().loadCache()).toBeNull();
     expect(localStorage.getItem(CACHE_KEY)).toBe(stored);
+  });
+
+  it('completes a person that has only an id and a name, so that a reload can draw the page', () => {
+    // Once such a person came back as it was, without prefs, and every reload drew a blank page.
+    const damaged = {
+      app: 'shift-scheduler',
+      schemaVersion: 1,
+      people: [{ id: 'p1', name: 'Operátor 1' }],
+      settings: {},
+      cells: {},
+      months: {},
+    };
+    const text = JSON.stringify(damaged);
+    localStorage.setItem(CACHE_KEY, text);
+    const loaded = browserStorage().loadCache();
+    expect(loaded?.people).toEqual([newPerson('p1', 'Operátor 1')]);
+    expect(loaded?.people[0].prefs.ratings).toEqual({});
+    expect(localStorage.getItem(CACHE_KEY)).toBe(text); // the stored value is left alone
   });
 
   it('returns null when localStorage cannot be read', () => {
