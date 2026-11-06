@@ -3,3 +3,11 @@ dist/
 test-results/
 playwright-report/
 coverage/
+
+# A save file holds the team's real names and data and must never be committed: under its default
+# name or a copy of it anywhere, and any JSON file at the root except the project's own.
+plan-smen*.json
+/*.json
+!/package.json
+!/package-lock.json
+!/tsconfig.json

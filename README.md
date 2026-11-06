@@ -52,7 +52,7 @@ Before you hand a build out, go through [Manual checks before handing out a buil
 - In Firefox, `Uložit do souboru` downloads the file, and `Otevřít soubor` opens it through a file chooser. The bar says `Změny nejsou uložené do souboru` (Changes are not saved to the file) until you save.
 - Clearing the browser's data loses the changes made since the last save to the file.
 
-**No team data is in this repository.** Names, preferences and requests exist only in the user's save file and browser cache. Tests and examples use a made-up team of eight people, A to H, in `src/test/team.ts`. Never commit a save file, a screenshot of a real plan or a real name.
+**No team data is in this repository.** Names, preferences and requests exist only in the user's save file and browser cache. Tests and examples use a made-up team of eight people, A to H, in `src/test/team.ts`. Never commit a save file, a screenshot of a real plan or a real name. `.gitignore` helps: it ignores `plan-smen*.json` anywhere, and every JSON file at the root except `package.json`, `package-lock.json` and `tsconfig.json`, so a new JSON file of the project at the root needs an exception line there.
 
 ## Manual checks before handing out a build
 
