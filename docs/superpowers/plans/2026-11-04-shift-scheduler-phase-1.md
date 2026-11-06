@@ -1,6 +1,6 @@
 # Shift Scheduler, Phase 1: Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [x]`) syntax for tracking.
 
 **Goal:** A single offline HTML page in which the team lead enters requests, generates a month's shift draft that follows the musts and leans towards the wishes, adjusts it with instant checks, copies rows into his Excel, and saves everything to a file. That is enough to plan January 2027.
 
@@ -10,60 +10,69 @@
 
 **Spec:** `docs/superpowers/specs/2026-11-04-shift-scheduler-design.md`. Phase 1 scope is §14 of the spec. Phase 2 (closing months, Přehled, yearly DOV/MD, paste-back, whole-team copy, full Pravidla, weekly-rest warning) gets its own plan.
 
-## Progress (paused 2026-11-05)
+## Progress (Phase 1 complete, 2026-11-06)
 
-Work runs on branch `phase-1` (31 commits on top of `main`, nothing pushed), task by task with subagent-driven development: an implementer, a task review, then fixes.
+All 18 tasks are implemented and reviewed on branch `phase-1`. Nothing is pushed or merged.
 
-**Done**
-- Tasks 1–14: implemented, reviewed and complete (`90ce99f`..`bffe174`).
-- Task 15: implemented and committed (`1a26a69 feat: generate drafts in a worker`). The suite passes (1064 tests in 30 files), typecheck is clean, and the built page generates in a blob worker from `file://` in Chromium. **Its task review has not run yet.**
+The final whole-branch review found three problems:
+- **Critical:** the rule engine did not see the next month's first day, so the generator could break M4 at a month end. Fixed by R51.
+- **Important:** there was no warning before closing the page with changes that were not in a file. Fixed by R52.
+- **Important:** a damaged person record blanked the page. Fixed by R53.
 
-**To do, in order**
-1. Review Task 15 over `bffe174..1a26a69` and fix what it finds. To judge: an extra `dispatch(action, ifLoads?)` guard in the store against a result landing after a file is opened; the hook also returns `percent` and `outcome`; the `Hotovo` line hides when the data is replaced.
-2. Task 16, paste dialog and row copy:
-   - show `PastePlan.namesColumn` in the dialog;
-   - the start person comes from the month grid;
-   - the row-copy button goes in the name cell (`th scope="row"`);
-   - tests that render `<App/>` query within the active tab panel;
-   - still to rule on: how the ignored values are listed, the names-column wording, and the text when copying fails.
-3. Task 17, rules screen:
-   - the W5a select is labelled `Držet se cíle 12h směn` (R3);
-   - consider moving the generic form pieces out of `PersonCard.tsx`;
-   - scope the generic CSS class names of the team screen.
-4. Task 18, e2e from the built file and the README:
-   - Chromium only, Firefox checked by hand (R6);
-   - `build.modulePreload: false` and a committed test that the CSP is enforced;
-   - R1/R2/O/O20 label two controls on every team card, so the test uses role + name;
-   - hidden tab panels stay mounted, so queries are scoped to the active panel;
-   - the month heading is the only `h2`, the arrows are named `◀`/`▶`, and `Kontrola` is a region whose summary reads `Musí: 0 · Přání: 0`.
-5. Final whole-branch review over `dfa9435..HEAD` on the most capable model, then one fix wave and one scoped re-review. The wave includes:
-   - R29: a refused write permission or a failed write to the held file falls through to the save picker;
-   - the deferred minor findings of Tasks 9–15 that the review keeps.
-6. Manual checks before delivery:
-   - Firefox: the page, the blob worker, the download fallback, the file input's cancel event;
-   - `requestPermission` after a long file pick;
-   - `crypto.randomUUID` on `file://`;
-   - focus behaviour.
-7. Finish the branch. Merging is the user's call.
+One fix wave dealt with these and with the triaged minor findings, and a scoped re-review confirmed every fix.
 
-**Parked for Phase 2:**
+Final state:
+- typecheck is clean;
+- 1382 unit tests in 34 files pass;
+- 5 Playwright e2e specs pass from the built file;
+- the January e2e passed 10 of 10 runs;
+- the generator's scenario pass rates are unchanged, and a new month-end scenario passes 24 of 24 seeds.
+
+**Decisions.** `2026-11-04-shift-scheduler-phase-1-notes.md` holds three lists:
+- every ruling made on the user's behalf (R1–R64);
+- the minor findings left deferred;
+- the parked items.
+
+Where a ruling differs from this plan's text, the ruling describes what was built. Examples are W8's message (R58) and the look-ahead to the next month (R51).
+
+**Before handing out a build:** do the manual checks listed in `README.md`:
+- Firefox;
+- headed Edge and Chrome;
+- the Czech decimal comma;
+- adding a person from disk;
+- focus;
+- the permission prompt when saving.
+
+**Open question for the user:** absences (DOV, MD, OP, NEM) on a weekend currently count 7,5 h toward the hours, as in spec §5.4. Spec §13 lists this as open. Should they count 0 h?
+
+**Phase 2** gets its own plan. It covers the spec's Phase 2 list:
+- closing months;
+- Přehled;
+- yearly DOV/MD;
+- paste-back;
+- whole-team copy;
+- the full Pravidla screen;
+- the weekly-rest warning.
+
+It also picks up the parked items:
 - reminders (R5);
-- the generator's construct step filling the most constrained slot first (R25);
 - keeping the file handle across reloads;
+- the construct step's slot order (R25);
+- the rest pre-filter when fixed cells already break a must (R62);
+- undo;
+- a screen for the month's hours adjustment;
+- checking each value in a save file, not just its structure (R64);
+- a save button on the error screen (R63);
 - quoted cells in Excel paste;
-- arrow-key movement in the month grid;
-- re-checking RESTARTS = 6 against the measured 20 s worker run of January 2027: about 5.4 M iterations, 253–282k per second, no broken must in 6/6 runs.
+- keyboard movement in the grid;
+- re-checking RESTARTS against measured worker runs (about 5.4 M iterations in 20 s).
 
-**Where the details are:**
-- The local, untracked ledger `.superpowers/sdd/2026-11-04-shift-scheduler-phase-1/progress.md` holds:
-  - every ruling (R1–R43), each with its reason and cost if wrong;
-  - the deferred minor findings;
-  - the carries between tasks.
-- The task briefs and reports sit next to it.
-- Where a ruling differs from this plan's text, the ruling wins. Examples:
-  - W9's message is `nevyrovnaný počet R2` (R42);
-  - `applyGenerated` carries `personIds`, `fixed` and `generatedAt` (R1, R32, R37);
-  - the open confirmation is an in-page dialog (R38).
+**Files added beyond the file map:**
+- `src/domain/rules/weekendWishes.ts`
+- `src/domain/rules/preferenceWishes.ts`
+- `src/ui/form.tsx`
+- `src/clipboard/copy.ts`
+- `src/ui/ErrorBoundary.tsx`
 
 ## Global Constraints
 
@@ -1279,13 +1288,13 @@ it('offers only 12-hour shifts on a weekend', async () => {
     - falls back to a hidden textarea and `document.execCommand('copy')`;
     - then shows `Zkopírováno – vložte do řádku směna v Excelu`.
 
-- [ ] **Step 1: Write the failing tests** (jsdom):
+- [x] **Step 1: Write the failing tests** (jsdom):
   - With the synthetic team and no cells: select `cell-A-2027-01-01`, open the dialog, type `x\tDOV\nMD` (B is the next row), click `Použít`. Expect A on Jan 1 to show `x`, A on Jan 2 `DOV`, and B on Jan 1 `MD`.
   - With `scenario('jan2027').data` and `navigator.clipboard.writeText` mocked: clicking `Kopírovat řádek Operátor A` calls it with a string that starts `x\tx\tx\t` and has 31 tab-separated fields.
-- [ ] **Step 2: Run.** Command: `npx vitest run src/ui/month/paste.test.tsx`. Expected: FAIL.
-- [ ] **Step 3: Implement** the dialog, the copy button and the toast.
-- [ ] **Step 4: Run.** Command: `npx vitest run src/ui`. Expected: PASS.
-- [ ] **Step 5: Commit:** `feat: paste from and copy to Excel`
+- [x] **Step 2: Run.** Command: `npx vitest run src/ui/month/paste.test.tsx`. Expected: FAIL.
+- [x] **Step 3: Implement** the dialog, the copy button and the toast.
+- [x] **Step 4: Run.** Command: `npx vitest run src/ui`. Expected: PASS.
+- [x] **Step 5: Commit:** `feat: paste from and copy to Excel`
 
 ---
 
@@ -1322,13 +1331,13 @@ it('offers only 12-hour shifts on a weekend', async () => {
 | W8 | Neoblíbené směny rovnoměrně |
 | W9 | Vyrovnané dny (R2) |
 
-- [ ] **Step 1: Write the failing tests** (jsdom, synthetic team):
+- [x] **Step 1: Write the failing tests** (jsdom, synthetic team):
   - O20 on Jan 6 followed by R1 on Jan 7 for C leaves 10 h of rest. With the default 12 h, `Kontrola` shows `R1 hned po O20`. After setting `Odpočinek mezi směnami (h)` to `10`, it no longer does.
   - Set the `Oblíbené směny` select to `0 – vypnuto` and expect `settings.wishLevels.W6 === 0`, read through a probe component that uses `useApp()`.
-- [ ] **Step 2: Run.** Command: `npx vitest run src/ui/rules`. Expected: FAIL.
-- [ ] **Step 3: Implement** `RulesScreen` and wire the tab.
-- [ ] **Step 4: Run.** Command: `npx vitest run src/ui`. Expected: PASS.
-- [ ] **Step 5: Commit:** `feat: rules screen`
+- [x] **Step 2: Run.** Command: `npx vitest run src/ui/rules`. Expected: FAIL.
+- [x] **Step 3: Implement** `RulesScreen` and wire the tab.
+- [x] **Step 4: Run.** Command: `npx vitest run src/ui`. Expected: PASS.
+- [x] **Step 5: Commit:** `feat: rules screen`
 
 ---
 
@@ -1341,7 +1350,7 @@ it('offers only 12-hour shifts on a weekend', async () => {
 **Interfaces:**
 - Consumes: the whole app.
 
-- [ ] **Step 1: Write the e2e test** against `file://…/dist/index.html`. Record any `http(s)` requests, and any CSP violations: `page.on('console')` messages matching `/Content Security Policy/i`.
+- [x] **Step 1: Write the e2e test** against `file://…/dist/index.html`. Record any `http(s)` requests, and any CSP violations: `page.on('console')` messages matching `/Content Security Policy/i`.
   - Click `Začít nový`.
   - Under `Pravidla`, set `Čas na generování (s)` to `5`.
   - Under `Měsíc`, click ▶ or ◀ until the heading is `Leden 2027`.
@@ -1349,12 +1358,12 @@ it('offers only 12-hour shifts on a weekend', async () => {
   - Expect every `coverage-2027-01-*` to read `✓`.
   - Expect the `Kontrola` summary to start with `Musí: 0`.
   - Expect no recorded requests and no CSP messages.
-- [ ] **Step 2: Run.** Command: `npm run test:e2e`. Expected: PASS (both specs).
-- [ ] **Step 3: Write `README.md`** in English, covering:
+- [x] **Step 2: Run.** Command: `npm run test:e2e`. Expected: PASS (both specs).
+- [x] **Step 3: Write `README.md`** in English, covering:
   - what the tool is;
   - `npm ci`, `npm test`, `npm run build`;
   - delivery: send `dist/index.html` and open it in Edge or Chrome, where auto-save to the file works;
   - that the save file is the real data and should be kept with his work files;
   - that no team data belongs in the repo.
-- [ ] **Step 4: Full check.** Commands: `npm run typecheck && npm test && npm run test:e2e`. Expected: all green.
-- [ ] **Step 5: Commit:** `test: end-to-end January plan; docs: README`
+- [x] **Step 4: Full check.** Commands: `npm run typecheck && npm test && npm run test:e2e`. Expected: all green.
+- [x] **Step 5: Commit:** `test: end-to-end January plan; docs: README`
