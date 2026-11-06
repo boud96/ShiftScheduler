@@ -73,6 +73,8 @@ interface GridProps {
   onCell(cell: CellRef): void;
   onChoose(choice: MenuChoice): void;
   onCloseMenu(): void;
+  /** The button in the name cell of a person was pressed: copy their row. */
+  onCopyRow(personId: PersonId): void;
 }
 
 /**
@@ -80,11 +82,11 @@ interface GridProps {
  * day, the last days of the previous month first. Each cell is a button that opens its menu. A
  * cell with a red outline is part of a broken must, one with an amber outline of the finding that
  * is selected in Kontrola. The totals of a person follow their row, and under the rows is the
- * coverage of each day.
+ * coverage of each day. The name cell of a person holds a button that copies their row.
  */
 export function Grid(props: GridProps) {
   const { grid, evaluation, names, cells, marks, selected, menuOpen } = props;
-  const { onCell, onChoose, onCloseMenu } = props;
+  const { onCell, onChoose, onCloseMenu, onCopyRow } = props;
   const { ctx } = grid;
   const problems = problemsOf(evaluation.findings);
   /** The button of the cell whose menu is open. */
@@ -144,7 +146,7 @@ export function Grid(props: GridProps) {
     );
   };
 
-  const { totals } = MONTH_SCREEN;
+  const { totals, copyRow } = MONTH_SCREEN;
   return (
     <div className="month-grid-scroll">
       <table className="month-grid">
@@ -173,11 +175,24 @@ export function Grid(props: GridProps) {
         <tbody>
           {grid.personIds.map((personId, p) => (
             <tr key={personId}>
+              {/* The row is called after the person alone, not after the button inside it. */}
               <th
                 scope="row"
+                aria-label={names[p]}
                 className={classes('month-person', marks.pickedPerson === p && 'flagged')}
               >
-                {names[p]}
+                <div className="month-person-box">
+                  <span>{names[p]}</span>
+                  <button
+                    type="button"
+                    className="month-copy"
+                    title={copyRow.label(names[p])}
+                    aria-label={copyRow.label(names[p])}
+                    onClick={() => onCopyRow(personId)}
+                  >
+                    {copyRow.glyph}
+                  </button>
+                </div>
               </th>
               {ctx.days.map((_, i) => renderCell(p, i))}
               <Totals id={personId} stats={evaluation.persons[p]} fpd={ctx.people[p].fpd} />

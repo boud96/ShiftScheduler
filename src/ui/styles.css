@@ -408,12 +408,20 @@ h1 {
   color: var(--muted);
 }
 
-.month-generate {
+/* The buttons at the right of the head: paste from Excel, and the generator's controls. */
+.month-actions {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   gap: 8px 12px;
   margin-left: auto;
+}
+
+.month-generate {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
 }
 
 .month-generate-progress,
@@ -476,6 +484,32 @@ h1 {
   text-align: left;
   white-space: nowrap;
   background: var(--surface);
+}
+
+.month-person-box {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.month-copy {
+  padding: 2px 4px;
+  font: inherit;
+  font-size: 0.8rem;
+  line-height: 1;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  opacity: 0.6;
+  cursor: pointer;
+}
+
+.month-copy:hover,
+.month-copy:focus-visible {
+  background: var(--bg);
+  border-color: var(--line);
+  opacity: 1;
 }
 
 .month-grid .month-totals {
@@ -688,6 +722,72 @@ h1 {
   height: 1px;
   margin: 2px 0;
   background: var(--line);
+}
+
+/* The note after a copy floats over the page, so that showing and hiding it moves nothing. */
+.month-note {
+  position: fixed;
+  bottom: 16px;
+  left: 50%;
+  z-index: 30;
+  max-width: calc(100vw - 32px);
+  pointer-events: none;
+  transform: translateX(-50%);
+}
+
+.month-note > span {
+  display: block;
+  padding: 8px 16px;
+  color: #fff;
+  background: var(--text);
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgb(0 0 0 / 22%);
+}
+
+.month-note > span[data-failed] {
+  color: var(--danger-text);
+  background: var(--danger-bg);
+  border: 1px solid var(--danger-line);
+}
+
+/* The dialog that takes cells pasted from Excel: the field, a count, and the values left out. */
+
+.paste-dialog {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: min(640px, calc(100vw - 32px));
+  max-height: calc(82vh - 16px);
+  overflow: auto;
+}
+
+.paste-dialog h2,
+.paste-dialog p {
+  margin: 0;
+}
+
+.paste-area {
+  width: 100%;
+  padding: 6px 8px;
+  font-family: ui-monospace, 'Cascadia Mono', Consolas, 'Liberation Mono', monospace;
+  font-size: 0.9rem;
+  color: var(--text);
+  tab-size: 4;
+  resize: vertical;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+}
+
+.paste-ignored {
+  max-height: 8.5em;
+  padding: 4px 8px 4px 28px;
+  margin: 0;
+  overflow: auto;
+  overflow-wrap: anywhere;
+  color: var(--warn-text);
+  background: var(--warn-bg);
+  border-radius: 6px;
 }
 
 /* Kontrola */

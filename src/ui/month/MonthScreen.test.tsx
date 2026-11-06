@@ -218,8 +218,11 @@ describe('the grid', () => {
     const data = plan(3);
     data.people[1].name = 'Jiné jméno';
     renderMonth(data);
-    const rows = screen.getAllByRole('rowheader').map((header) => header.textContent);
-    expect(rows).toEqual(['Operátor A', 'Jiné jméno', 'Operátor C', 'Obsazeno']);
+    // A name cell holds the button that copies the row too: the header is still called the name.
+    const names = ['Operátor A', 'Jiné jméno', 'Operátor C', 'Obsazeno'];
+    const rows = screen.getAllByRole('rowheader');
+    expect(rows).toHaveLength(names.length);
+    names.forEach((name, k) => expect(rows[k]).toHaveAccessibleName(name));
   });
 
   it('has no row for someone who is not in the team at all that month', () => {

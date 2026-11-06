@@ -1,4 +1,7 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { copyText } from '../../clipboard/copy';
+import { personRowTsv } from '../../clipboard/tsv';
+import type { PastePlan } from '../../clipboard/tsv';
 import { addMonths, fpdForMonth, weekdayCount } from '../../domain/calendar';
 import { isShift, nameOf } from '../../domain/codes';
 import type { CodeInt } from '../../domain/codes';
@@ -7,7 +10,7 @@ import type { MonthGrid } from '../../domain/context';
 import { fmtH } from '../../domain/format';
 import { evaluateMonth } from '../../domain/rules/evaluate';
 import type { MonthEval } from '../../domain/rules/evaluate';
-import type { AppData, CodeName, MonthKey, StoredCell } from '../../domain/types';
+import type { AppData, CodeName, MonthKey, PersonId, StoredCell } from '../../domain/types';
 import { useApp } from '../store';
 import { MONTH_NAMES, MONTH_SCREEN } from '../text';
 import type { MenuChoice } from './CellMenu';
@@ -15,6 +18,8 @@ import { ChecksPanel, checksOf, marksOf } from './ChecksPanel';
 import type { Check } from './ChecksPanel';
 import { Grid } from './Grid';
 import type { CellRef } from './Grid';
+import { PasteDialog } from './PasteDialog';
+import type { PasteStart } from './PasteDialog';
 import { useGenerator } from './useGenerator';
 import type { Generator, GeneratorOutcome } from './useGenerator';
 
@@ -119,6 +124,31 @@ function storedCell(code: CodeInt): StoredCell {
   return isShift(code) ? { code: name, pinned: true } : { code: name };
 }
 
+/**
+ * Where a paste from Excel starts: at the selected cell, a day of the previous month included, or
+ * else at the first person of the grid on day 1 of the month. A selected cell of a person who is no
+ * longer in the grid counts for nothing. Null for a month with nobody in the team.
+ */
+function pasteStart(view: MonthView, selected: CellRef | null): PasteStart | null {
+  const { personIds, ctx } = view.grid;
+  const at = selected === null ? -1 : personIds.indexOf(selected.personId);
+  if (selected !== null && at >= 0) {
+    return { personId: selected.personId, name: view.names[at], date: selected.date };
+  }
+  if (personIds.length === 0) return null;
+  return { personId: personIds[0], name: view.names[0], date: ctx.days[ctx.first].date };
+}
+
+/** How long the note after a copy stays, in ms. */
+const NOTE_MS = 4000;
+
+/** What the note after a copy says. `id` is new for each, so that the same words are read again. */
+interface CopyNote {
+  id: number;
+  text: string;
+  failed: boolean;
+}
+
 interface MonthScreenProps {
   /** The month to show first. The page leaves it out and gets the month after this one. */
   initialMonth?: MonthKey;
@@ -127,7 +157,9 @@ interface MonthScreenProps {
 /**
  * The main screen: one month as a grid of people and days, with the checks of the rules under it.
  * An edit goes to the data, and the checks and totals follow it at once. The month, the selected
- * cell and the selected check are the screen's own state.
+ * cell and the selected check are the screen's own state, and so are the paste dialog (`Vložit z
+ * Excelu`, which starts at the selected cell) and the note that tells how the last copy of a row
+ * went.
  */
 export function MonthScreen({ initialMonth }: MonthScreenProps) {
   const { data, dispatch } = useApp();
@@ -142,12 +174,19 @@ export function MonthScreen({ initialMonth }: MonthScreenProps) {
   const menuOpen = selection?.menuOpen ?? false;
   /** The key of the line of Kontrola that was clicked. */
   const [picked, setPicked] = useState<string | null>(null);
+  /** Whether the dialog that pastes from Excel is open, and the button that opened it. */
+  const [pasting, setPasting] = useState(false);
+  const pasteButton = useRef<HTMLButtonElement>(null);
+  /** How the last copy of a row went, until NOTE_MS have passed or the next one replaces it. */
+  const [copyNote, setCopyNote] = useState<CopyNote | null>(null);
+  const noteTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
+  useEffect(() => () => clearTimeout(noteTimer.current), []);
 
   // Building and evaluating a month is the work of the screen: only the data and the month are
   // allowed to start it, not a click that selects something.
   const view = useMemo(() => (data === null ? null : buildView(data, month)), [data, month]);
   const marks = useMemo(() => marksOf(view?.checks ?? [], picked), [view, picked]);
-  if (view === null) return null;
+  if (view === null || data === null) return null;
 
   const show = (to: MonthKey) => {
     setMonth(to);
@@ -174,6 +213,28 @@ export function MonthScreen({ initialMonth }: MonthScreenProps) {
     dispatch({ type: 'setCell', date, personId, cell });
   };
 
+  const closePaste = () => {
+    setPasting(false);
+    pasteButton.current?.focus();
+  };
+
+  const onPaste = (plan: PastePlan) => {
+    dispatch({ type: 'applyPaste', plan });
+    closePaste();
+  };
+
+  /** Copies the row of a person as the page shows it, and tells how that went. */
+  const onCopyRow = (personId: PersonId) => {
+    const { copied, failed } = MONTH_SCREEN.copyRow;
+    // The copy starts here, within the click: a browser lets it through only for a fresh click.
+    void copyText(personRowTsv(data, month, personId)).then((ok) => {
+      setCopyNote((was) => ({ id: (was?.id ?? 0) + 1, text: ok ? copied : failed, failed: !ok }));
+      clearTimeout(noteTimer.current);
+      noteTimer.current = setTimeout(() => setCopyNote(null), NOTE_MS);
+    });
+  };
+
+  const start = pasting ? pasteStart(view, selected) : null;
   const title = `${MONTH_NAMES[Number(month.slice(5, 7)) - 1]} ${month.slice(0, 4)}`;
   return (
     <section className="month-screen">
@@ -201,11 +262,22 @@ export function MonthScreen({ initialMonth }: MonthScreenProps) {
           {MONTH_SCREEN.status[view.status]}
         </span>
         <p className="month-info">{view.info}</p>
-        <GenerateControls
-          generator={generator}
-          month={month}
-          hasPeople={view.grid.rows.length > 0}
-        />
+        <div className="month-actions">
+          <button
+            type="button"
+            className="button"
+            ref={pasteButton}
+            disabled={view.grid.rows.length === 0}
+            onClick={() => setPasting(true)}
+          >
+            {MONTH_SCREEN.paste.open}
+          </button>
+          <GenerateControls
+            generator={generator}
+            month={month}
+            hasPeople={view.grid.rows.length > 0}
+          />
+        </div>
       </div>
       <Grid
         grid={view.grid}
@@ -218,12 +290,30 @@ export function MonthScreen({ initialMonth }: MonthScreenProps) {
         onCell={onCell}
         onChoose={onChoose}
         onCloseMenu={closeMenu}
+        onCopyRow={onCopyRow}
       />
       <ChecksPanel
         checks={view.checks}
         picked={picked}
         onPick={(key) => setPicked(picked === key ? null : key)}
       />
+      {start !== null && (
+        <PasteDialog
+          data={data}
+          month={month}
+          start={start}
+          onApply={onPaste}
+          onClose={closePaste}
+        />
+      )}
+      {/* A live region that is always there, so that what is put into it is read out. */}
+      <div className="month-note" role="status">
+        {copyNote !== null && (
+          <span key={copyNote.id} data-failed={copyNote.failed || undefined}>
+            {copyNote.text}
+          </span>
+        )}
+      </div>
     </section>
   );
 }

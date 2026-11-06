@@ -118,6 +118,30 @@ export const MONTH_SCREEN = {
     done: (mustUnits: number): string => `Hotovo. Porušená pravidla: ${mustUnits}`,
     failed: (message: string): string => `Generování se nepodařilo: ${message}`,
   },
+  /** The dialog that takes cells pasted from Excel, and the button in the head that opens it. */
+  paste: {
+    open: 'Vložit z Excelu',
+    title: 'Vložit z Excelu',
+    /** `name` is the person of the first pasted row, `date` the first pasted day as `D. M.`. */
+    start: (name: string, date: string): string => `Začátek: ${name}, ${date}`,
+    area: 'Sem vložte buňky z Excelu (Ctrl+V)',
+    /** `recognised` cells would be stored, `ignored` values would not. */
+    summary: (recognised: number, ignored: number): string =>
+      `Rozpoznáno: ${recognised} · Ignorováno: ${ignored}`,
+    /** `row` and `column` count from 1, in the text as it was pasted. */
+    ignoredValue: (value: string, row: number, column: number): string =>
+      `${value} (řádek ${row}, sloupec ${column})`,
+    namesColumn: 'První sloupec vypadá jako jména, vynechá se.',
+    apply: 'Použít',
+    cancel: 'Zrušit',
+  },
+  /** The button in the name cell that copies a row for Excel, and the note after the copy. */
+  copyRow: {
+    glyph: '📋',
+    label: (name: string): string => `Kopírovat řádek ${name}`,
+    copied: 'Zkopírováno – vložte do řádku směna v Excelu',
+    failed: 'Kopírování se nepodařilo.',
+  },
 };
 
 /** An option of a select, and the value that it stands for. */
