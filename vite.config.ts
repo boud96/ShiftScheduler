@@ -26,6 +26,11 @@ function cspMeta(): Plugin {
 
 export default defineConfig({
   plugins: [react(), viteSingleFile(), cspMeta()],
+  build: {
+    // The single-file page has nothing to preload. Vite's polyfill for browsers that cannot
+    // preload modules would `fetch` the hrefs, which `connect-src 'none'` forbids.
+    modulePreload: false,
+  },
   test: {
     include: ['src/**/*.test.{ts,tsx}'],
     environment: 'node',
