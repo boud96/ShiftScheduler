@@ -769,3 +769,193 @@ describe('an action stamped with loads', () => {
     expect(rest()).toBe(10);
   });
 });
+
+describe('leaving the page', () => {
+  /**
+   * What the browser does when the page is about to go away: it fires `beforeunload`, and asks the
+   * user to confirm if the handler objects. jsdom takes `returnValue = ''` on a plain event for a
+   * cancel, and a BeforeUnloadEvent cannot be made there, so the event is given a `returnValue` of
+   * its own, as the browser's has: the test sees both ways of objecting.
+   */
+  function leave() {
+    const event = new Event('beforeunload', { cancelable: true });
+    Object.defineProperty(event, 'returnValue', { value: undefined, writable: true });
+    const preventDefault = vi.spyOn(event, 'preventDefault');
+    act(() => void window.dispatchEvent(event));
+    return { objected: preventDefault.mock.calls.length > 0, returnValue: event.returnValue };
+  }
+  const objects = () => leave().objected;
+
+  it('lets an untouched page go: cached data counts as unsaved, but it was not changed here', () => {
+    mount(memoryStorage(newAppData()));
+    expect(app.file.dirty).toBe(true);
+    expect(leave()).toEqual({ objected: false, returnValue: undefined });
+  });
+
+  it('lets a page with no data go', () => {
+    mount(memoryStorage(null));
+    expect(objects()).toBe(false);
+  });
+
+  it('objects to a change made here, with a return value, as the browsers ask for', async () => {
+    mount(memoryStorage(newAppData()));
+    await setRest(11);
+    expect(leave()).toEqual({ objected: true, returnValue: '' });
+  });
+
+  it('objects to a new plan that is not in a file', () => {
+    mount(memoryStorage(null));
+    act(() => app.newData());
+    expect(objects()).toBe(true);
+  });
+
+  it('does not object to an action that changes nothing', async () => {
+    mount(memoryStorage(newAppData()));
+    act(() => app.dispatch({ type: 'togglePin', date: '2027-01-04', personId: 'p1' }));
+    expect(objects()).toBe(false);
+  });
+
+  it('objects while the cache has the change but no file does, and after the cache is written', async () => {
+    mount(memoryStorage(newAppData()));
+    await setRest(11);
+    await advance(300); // the cache has it
+    expect(objects()).toBe(true);
+  });
+
+  it('stops objecting once the data has been saved to a file', async () => {
+    const storage = memoryStorage(newAppData());
+    mount(storage);
+    await setRest(11);
+    expect(objects()).toBe(true);
+    await act(() => app.saveFile());
+    expect(storage.saved).toHaveLength(1);
+    expect(objects()).toBe(false);
+    await setRest(10); // and it starts again with the next change
+    expect(objects()).toBe(true);
+  });
+
+  it('goes on objecting when a change came in while the file was being saved', async () => {
+    const storage = memoryStorage(newAppData());
+    const write = deferred<string>();
+    storage.saveFile = () => write.promise;
+    mount(storage);
+    await setRest(11);
+    let saved!: Promise<void>;
+    await act(async () => {
+      saved = app.saveFile();
+    });
+    await setRest(10); // the file is being written with the data from before
+    await act(async () => {
+      write.resolve('plan-smen.json');
+      await saved;
+    });
+    expect(objects()).toBe(true);
+  });
+
+  it('goes on objecting when the save fails or is cancelled', async () => {
+    const storage = memoryStorage(newAppData());
+    const saveFile = vi.spyOn(storage, 'saveFile');
+    mount(storage);
+    await setRest(11);
+    saveFile.mockRejectedValueOnce(new Error('The disk is full.'));
+    await act(() => app.saveFile());
+    expect(objects()).toBe(true);
+    saveFile.mockRejectedValueOnce(abortError());
+    await act(() => app.saveFile());
+    expect(objects()).toBe(true);
+  });
+
+  it('stops objecting once another file has replaced the data', async () => {
+    const storage = memoryStorage(newAppData());
+    storage.openFile = async () => otherPlan();
+    mount(storage);
+    await setRest(11);
+    expect(objects()).toBe(true);
+    await act(() => app.openFile());
+    expect(app.data?.people[0].name).toBe('Jiný plán');
+    expect(objects()).toBe(false);
+  });
+
+  it('goes on objecting when opening a file is cancelled or fails', async () => {
+    const storage = memoryStorage(newAppData());
+    mount(storage);
+    await setRest(11);
+    await act(() => app.openFile()); // memoryStorage opens nothing: null, as for a cancel
+    expect(objects()).toBe(true);
+    storage.openFile = async () => {
+      throw new SaveFileError('Soubor je poškozený.');
+    };
+    await act(() => app.openFile());
+    expect(objects()).toBe(true);
+  });
+
+  it('objects until auto-save has written the change to the file, and not after', async () => {
+    const { autoSave } = await mountWithOpenFile();
+    expect(objects()).toBe(false); // just opened: the page matches the file
+    await setRest(11);
+    expect(objects()).toBe(true); // the file has not got it yet
+    await advance(999);
+    expect(objects()).toBe(true);
+    await advance(1);
+    expect(autoSave).toHaveBeenCalledTimes(1);
+    expect(objects()).toBe(false);
+  });
+
+  it('goes on objecting while an auto-save is in flight, and when it has not caught up', async () => {
+    const { autoSave } = await mountWithOpenFile();
+    const write = deferred();
+    autoSave.mockImplementationOnce(() => write.promise);
+    await setRest(11);
+    await advance(1000); // in flight
+    expect(objects()).toBe(true);
+    await setRest(10); // while it is
+    await act(async () => write.resolve());
+    expect(objects()).toBe(true); // the file has the 11, not the 10
+    await advance(1000);
+    expect(autoSave).toHaveBeenCalledTimes(2);
+    expect(objects()).toBe(false);
+  });
+
+  it('goes on objecting when auto-save fails', async () => {
+    const { autoSave, setAuto } = await mountWithOpenFile();
+    autoSave.mockImplementationOnce(async () => {
+      setAuto(false);
+      throw new Error('The disk is full.');
+    });
+    await setRest(11);
+    await advance(1000);
+    expect(app.file.dirty).toBe(true);
+    expect(objects()).toBe(true);
+  });
+
+  it('goes on objecting when a change meets a file that can no longer be saved to by itself', async () => {
+    const { setAuto } = await mountWithOpenFile();
+    setAuto(false);
+    await setRest(11);
+    await advance(5000);
+    expect(objects()).toBe(true);
+  });
+
+  it('is not fooled by a write to a file that has been left behind', async () => {
+    const { autoSave } = await mountWithOpenFile();
+    const first = deferred();
+    autoSave.mockImplementationOnce(() => first.promise);
+    await setRest(11);
+    await advance(1000); // a write of the old data is in flight
+    await act(() => app.openFile()); // another file, which matches the page
+    expect(objects()).toBe(false);
+    await act(async () => first.resolve());
+    expect(objects()).toBe(false);
+  });
+
+  it('asks once, in strict mode too, and no longer after the provider is gone', async () => {
+    const { unmount } = mount(memoryStorage(newAppData()), true);
+    await setRest(11);
+    const event = new Event('beforeunload', { cancelable: true });
+    const preventDefault = vi.spyOn(event, 'preventDefault');
+    act(() => void window.dispatchEvent(event));
+    expect(preventDefault).toHaveBeenCalledTimes(1);
+    unmount();
+    expect(objects()).toBe(false);
+  });
+});

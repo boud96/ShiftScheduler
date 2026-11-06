@@ -44,7 +44,10 @@ Before you hand a build out, go through [Manual checks before handing out a buil
 
 **Browser storage only caches it.** The page also keeps every change in the browser's storage, so that a reload loses nothing. A browser may clear that storage (a managed browser may do so each time it closes), and a new copy of the HTML file may count as a new site with an empty cache. Then the page shows its start screen, and you open the save file with `Otevřít soubor` (Open file).
 
-- In Edge and Chrome, once you have opened a file or saved to one, every change is written to it by itself, about a second after the change. The bar at the top says so: `Ukládá se automaticky do …` (Saving automatically to …). The page forgets which file it was saving to when it is reloaded. Pick the file again, with `Uložit do souboru` or `Otevřít soubor`, to carry on with auto-save.
+- In Edge and Chrome, once you have opened a file or saved to one, every change is written to it by itself, about a second after the change. The bar at the top says so: `Ukládá se automaticky do …` (Saving automatically to …). The page forgets which file it was saving to when it is reloaded, so auto-save is off in every new session until you pick the file again, in one of two ways:
+  - `Uložit do souboru` (Save to file) writes what the page shows to the file you pick, and from then on resumes auto-saving to it. Use it after a reload to carry on with the plan on the page.
+  - `Otevřít soubor` (Open file) replaces the page's data with the file's, and auto-saves to that file from then on. Use it to go back to what the file holds. Changes on the page that are not in a file are lost, so the page asks first (`Neuložené změny`, Unsaved changes).
+- The browser asks you to confirm before the page is closed or reloaded while it holds changes made in this session that are not in a file. A page that was only reloaded and not changed since does not ask, although the bar says that its data is not saved to a file: it holds what it held before the reload.
 - In Firefox, `Uložit do souboru` downloads the file, and `Otevřít soubor` opens it through a file chooser. The bar says `Změny nejsou uložené do souboru` (Changes are not saved to the file) until you save.
 - Clearing the browser's data loses the changes made since the last save to the file.
 

@@ -88,6 +88,11 @@ interface AppProviderProps {
  * cache after 300 ms, and where the file can be written to without asking, to the file after 1 s.
  * Elsewhere the changes are marked as not in the file. At most one write to the file runs at a
  * time; a change that comes in during one is written after it, with the latest data.
+ *
+ * A page that holds changes made since it was opened (or since the data last matched a file) that
+ * no file has yet asks the browser to confirm before it is closed or reloaded. Data that came from
+ * the cache is marked as not in a file too, but it is no change of this session: that alone does
+ * not ask.
  */
 export function AppProvider({ storage, runner, children }: AppProviderProps) {
   const [initial] = useState(() => {
@@ -109,6 +114,8 @@ export function AppProvider({ storage, runner, children }: AppProviderProps) {
   const latest = useRef(initial.data);
   /** The count of replacements as of now, where `loads` is as of the last render. */
   const replacements = useRef(0);
+  /** Whether changes made in this session are not in a file: what leaving the page would lose. */
+  const unsaved = useRef(false);
   const timers = useRef<{ cache?: Timer; file?: Timer }>({});
   const writes = useRef({
     /** Ends when every write so far has. */
@@ -157,6 +164,7 @@ export function AppProvider({ storage, runner, children }: AppProviderProps) {
         const fileNo = writes.current.fileNo;
         try {
           await storage.autoSave(current);
+          if (latest.current === current) unsaved.current = false; // the file has all of it
         } catch {
           // The data stays. The adapter no longer saves by itself, so the user's next save is
           // what puts it back on, and until then the status says that the file is behind.
@@ -172,6 +180,7 @@ export function AppProvider({ storage, runner, children }: AppProviderProps) {
 
     /** The data changed, other than by opening a file. */
     const changed = () => {
+      unsaved.current = true;
       scheduleCache();
       if (storage.canAutoSave()) scheduleAutoSave();
       else setFile((f) => (f.dirty && !f.auto ? f : { ...f, dirty: true, auto: false }));
@@ -219,6 +228,7 @@ export function AppProvider({ storage, runner, children }: AppProviderProps) {
       writes.current.fileNo++;
       clearTimeout(timers.current.file);
       latest.current = opened;
+      unsaved.current = false; // the page matches the file it was read from
       setData(opened);
       replaced();
       scheduleCache();
@@ -247,6 +257,7 @@ export function AppProvider({ storage, runner, children }: AppProviderProps) {
       const auto = storage.canAutoSave();
       // The file has what was saved, not what came in during the write.
       const behind = latest.current !== saved;
+      unsaved.current = behind;
       setFile({
         name: storage.fileName(),
         savedAt: new Date().toISOString(),
@@ -276,6 +287,19 @@ export function AppProvider({ storage, runner, children }: AppProviderProps) {
       clearTimeout(timers.current.file);
     };
   }, [actions]);
+
+  // Closing or reloading the page with changes that are not in a file loses them from the file's
+  // point of view: the browser is asked to confirm. It shows a text of its own; the empty
+  // `returnValue` is what older browsers want in order to ask at all.
+  useEffect(() => {
+    const confirmLeaving = (event: BeforeUnloadEvent) => {
+      if (!unsaved.current) return;
+      event.preventDefault();
+      event.returnValue = '';
+    };
+    window.addEventListener('beforeunload', confirmLeaving);
+    return () => window.removeEventListener('beforeunload', confirmLeaving);
+  }, []);
 
   const store = useMemo<AppStore>(
     () => ({
