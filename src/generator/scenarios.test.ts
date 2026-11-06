@@ -82,9 +82,11 @@ function rowOf(g: MonthGrid, rows: Uint8Array[], id: PersonId): Uint8Array {
   return rows[g.personIds.indexOf(id)];
 }
 
-/** The index in `ctx.days` of `date`. */
+/** The index in `ctx.days` of `date`. A date that is not there is a slip of the test: it throws. */
 function dayOf(g: MonthGrid, date: ISODate): number {
-  return g.ctx.days.findIndex((day) => day.date === date);
+  const index = g.ctx.days.findIndex((day) => day.date === date);
+  if (index < 0) throw new Error(`dayOf: ${date} is not in the tail or the days of ${g.ctx.month}`);
+  return index;
 }
 
 /** The runs of nights (N and N12 one after the other) in the days of the month of `row`. */
@@ -102,6 +104,18 @@ function twelveCounts(ev: MonthEval): number[] {
 }
 
 describe('generator scenarios', () => {
+  it('finds a date in the context, and throws for one that is not there', () => {
+    const { data, month } = scenario('jan2027');
+    const g = buildMonthGrid(data, month);
+    expect(dayOf(g, '2026-12-25')).toBe(0); // the first day of the tail
+    expect(dayOf(g, '2027-01-01')).toBe(g.ctx.first);
+    expect(dayOf(g, '2027-01-31')).toBe(g.ctx.days.length - 1);
+    // a day after the month, one before the tail, a slip of the pen
+    expect(() => dayOf(g, '2027-02-01')).toThrow('2027-02-01');
+    expect(() => dayOf(g, '2026-12-24')).toThrow('2026-12-24');
+    expect(() => dayOf(g, '2027-1-15')).toThrow('2027-1-15');
+  });
+
   it('builds July 2027 with at most two people away on any day', () => {
     const { data, month } = scenario('jul2027');
     const g = buildMonthGrid(data, month);

@@ -15,5 +15,10 @@ test('built file opens from disk without any network request', async ({ page }) 
 
 test('build is a single file with a CSP that blocks connections', () => {
   expect(fs.readdirSync('dist')).toEqual(['index.html']);
-  expect(fs.readFileSync('dist/index.html', 'utf8')).toContain("connect-src 'none'");
+  const html = fs.readFileSync('dist/index.html', 'utf8');
+  expect(html).toContain("connect-src 'none'");
+  // A second layer under the policy. With build.modulePreload off (vite.config.ts) the build has
+  // no call of fetch: Vite's polyfill for module preload would bring one, which the policy would
+  // then block at run time. The build is checked here, before anything can be blocked.
+  expect(html).not.toContain('fetch(');
 });

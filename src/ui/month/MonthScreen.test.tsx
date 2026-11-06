@@ -219,10 +219,14 @@ describe('the grid', () => {
     data.people[1].name = 'Jiné jméno';
     renderMonth(data);
     // A name cell holds the button that copies the row too: the header is still called the name.
+    // Its aria-label gives the accessible name by itself, so the name that is seen is checked too.
     const names = ['Operátor A', 'Jiné jméno', 'Operátor C', 'Obsazeno'];
     const rows = screen.getAllByRole('rowheader');
     expect(rows).toHaveLength(names.length);
-    names.forEach((name, k) => expect(rows[k]).toHaveAccessibleName(name));
+    names.forEach((name, k) => {
+      expect(rows[k]).toHaveAccessibleName(name);
+      expect(rows[k]).toHaveTextContent(name);
+    });
   });
 
   it('has no row for someone who is not in the team at all that month', () => {
