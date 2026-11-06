@@ -130,9 +130,15 @@ export const MONTH_SCREEN = {
     stop: 'Zastavit',
     /** `percent` is the share of the run's time that has gone, 0 to 100. */
     running: (percent: number): string => `Generuji… ${percent} %`,
-    /** `mustUnits` is how much of the musts the draft still breaks, as the checks count it. */
-    done: (mustUnits: number): string => `Hotovo. Porušená pravidla: ${mustUnits}`,
-    failed: (message: string): string => `Generování se nepodařilo: ${message}`,
+    /**
+     * `musts` is the number of broken musts that Kontrola lists for the month now, the number of
+     * `Musí: N`. It is not the search's count of must units: that is the draft as the run found
+     * it, and it counts units, not findings. Edits made during the run, or after it, change this
+     * one.
+     */
+    done: (musts: number): string => `Hotovo. Porušená pravidla: ${musts}`,
+    /** What went wrong is not for this line: the error is written to the console. */
+    failed: 'Generování se nepodařilo.',
   },
   /** The dialog that takes cells pasted from Excel, and the button in the head that opens it. */
   paste: {

@@ -10,12 +10,16 @@ import { useApp } from '../store';
 /** The most iterations a run may do. The time budget ends it long before. */
 const MAX_ITERATIONS = 50_000_000;
 
-/** How the last run ended, and which month it was for. */
+/**
+ * How the last run ended, and which month it was for. It does not say how many musts are broken
+ * or what went wrong: the first is for the screen to count from the data as it is when it tells
+ * of the run (the data here is from the start of the run), and the second goes to the console.
+ */
 export type GeneratorOutcome =
-  | { kind: 'done'; month: MonthKey; mustUnits: number }
-  | { kind: 'failed'; month: MonthKey; message: string };
+  | { kind: 'done'; month: MonthKey }
+  | { kind: 'failed'; month: MonthKey };
 
-export interface Generator {
+export interface GeneratorControls {
   /** True from `start` until the run has ended and its draft is in the data. */
   running: boolean;
   /** The latest report of the run, or null before the first. */
@@ -57,8 +61,6 @@ const NOTHING: Shown = { loads: 0, running: false, budgetMs: 0, progress: null, 
 /** A seed for the search: a random whole number from 0 to 2^32 - 1. */
 const randomSeed = (): number => crypto.getRandomValues(new Uint32Array(1))[0];
 
-const messageOf = (e: unknown): string => (e instanceof Error ? e.message : String(e));
-
 /** Empties the cells of the month that the search may change, so that it builds a fresh draft. */
 function clearFreeCells({ ctx, rows, fixed }: MonthGrid): void {
   rows.forEach((row, p) => {
@@ -85,7 +87,7 @@ function percentOf(progress: SearchProgress | null, budgetMs: number): number {
  * A run belongs to the data it began on. When the data is replaced (a file is opened, a new plan is
  * started), or the screen goes away, the search is stopped and nothing it ends with is used.
  */
-export function useGenerator(): Generator {
+export function useGenerator(): GeneratorControls {
   const { data, dispatch, runner, loads } = useApp();
   const [shown, setShown] = useState(NOTHING);
   const active = useRef<ActiveRun | null>(null);
@@ -116,6 +118,11 @@ export function useGenerator(): Generator {
     const began = loads;
     const end = (outcome: GeneratorOutcome): void =>
       setShown({ loads: began, running: false, budgetMs, progress: null, outcome });
+    /** A run that failed: the screen says so in Czech, and what went wrong goes to the console. */
+    const fail = (e: unknown): void => {
+      console.error('The generator run failed.', e);
+      end({ kind: 'failed', month });
+    };
 
     let discarded = false;
     let handle: ReturnType<GeneratorRunner>;
@@ -127,7 +134,7 @@ export function useGenerator(): Generator {
         },
       );
     } catch (e) {
-      end({ kind: 'failed', month, message: messageOf(e) });
+      fail(e);
       return;
     }
 
@@ -164,12 +171,12 @@ export function useGenerator(): Generator {
           },
           began,
         );
-        end({ kind: 'done', month, mustUnits: result.mustUnits });
+        end({ kind: 'done', month });
       })
       .catch((e: unknown) => {
         if (discarded) return;
         release();
-        end({ kind: 'failed', month, message: messageOf(e) });
+        fail(e);
       });
   };
 

@@ -14,14 +14,14 @@ import type { AppData, CodeName, MonthKey, PersonId, StoredCell } from '../../do
 import { useApp } from '../store';
 import { MONTH_NAMES, MONTH_SCREEN } from '../text';
 import type { MenuChoice } from './CellMenu';
-import { ChecksPanel, checksOf, marksOf } from './ChecksPanel';
+import { ChecksPanel, checksOf, countMusts, marksOf } from './ChecksPanel';
 import type { Check } from './ChecksPanel';
 import { Grid } from './Grid';
 import type { CellRef } from './Grid';
 import { PasteDialog } from './PasteDialog';
 import type { PasteStart } from './PasteDialog';
 import { useGenerator } from './useGenerator';
-import type { Generator, GeneratorOutcome } from './useGenerator';
+import type { GeneratorControls, GeneratorOutcome } from './useGenerator';
 
 /** The month after the one that today is in, by the local date: the one that is still to plan. */
 function defaultMonth(): MonthKey {
@@ -64,28 +64,30 @@ function buildView(data: AppData, month: MonthKey): MonthView {
 }
 
 interface GenerateControlsProps {
-  generator: Generator;
+  generator: GeneratorControls;
   /** The month that is shown. */
   month: MonthKey;
   /** Whether the month has anybody to plan: with nobody there is nothing to generate. */
   hasPeople: boolean;
+  /** The broken musts that Kontrola lists for the month now: what a finished run says it left. */
+  musts: number;
 }
 
 /** The line that tells how a run ended: empty while there is nothing to tell. */
-function outcomeLine(outcome: GeneratorOutcome | null): string {
+function outcomeLine(outcome: GeneratorOutcome | null, musts: number): string {
   const { generate } = MONTH_SCREEN;
   if (outcome === null) return '';
-  return outcome.kind === 'done'
-    ? generate.done(outcome.mustUnits)
-    : generate.failed(outcome.message);
+  return outcome.kind === 'done' ? generate.done(musts) : generate.failed;
 }
 
 /**
  * The button that starts the generator and what goes with a run: the time spent and the button
  * that stops it, then how it ended. The run is the screen's, whichever month is shown, but how it
- * ended is told only with the month it was for.
+ * ended is told only with the month it was for. A finished run says how many musts Kontrola of
+ * the month lists now, not what the search counted when it ended: the same number as `Musí: N`,
+ * whatever has been edited since the run began.
  */
-function GenerateControls({ generator, month, hasPeople }: GenerateControlsProps) {
+function GenerateControls({ generator, month, hasPeople, musts }: GenerateControlsProps) {
   const { generate } = MONTH_SCREEN;
   const told = generator.outcome?.month === month ? generator.outcome : null;
   return (
@@ -112,7 +114,7 @@ function GenerateControls({ generator, month, hasPeople }: GenerateControlsProps
         role="status"
         data-failed={told?.kind === 'failed' || undefined}
       >
-        {outcomeLine(told)}
+        {outcomeLine(told, musts)}
       </span>
     </div>
   );
@@ -276,6 +278,7 @@ export function MonthScreen({ initialMonth }: MonthScreenProps) {
             generator={generator}
             month={month}
             hasPeople={view.grid.rows.length > 0}
+            musts={countMusts(view.checks)}
           />
         </div>
       </div>

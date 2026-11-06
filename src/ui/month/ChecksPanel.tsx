@@ -102,6 +102,10 @@ export function marksOf(checks: readonly Check[], pickedKey: string | null): Mar
   return { must, picked, pickedDays, pickedPerson };
 }
 
+/** How many of the checks are broken musts: the `Musí: N` of the panel. */
+export const countMusts = (checks: readonly Check[]): number =>
+  checks.filter((c) => c.finding.severity === 'must').length;
+
 interface ChecksPanelProps {
   checks: readonly Check[];
   /** The key of the check that is selected, if one is. */
@@ -112,7 +116,7 @@ interface ChecksPanelProps {
 /** What the rules say about the month: the number of musts and of wishes, and a line for each. */
 export function ChecksPanel({ checks, picked, onPick }: ChecksPanelProps) {
   const headingId = useId();
-  const musts = checks.filter((c) => c.finding.severity === 'must').length;
+  const musts = countMusts(checks);
   return (
     <section className="month-checks" aria-labelledby={headingId}>
       <h3 id={headingId}>{MONTH_SCREEN.checks}</h3>

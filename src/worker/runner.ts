@@ -67,8 +67,11 @@ const toError = (e: unknown): Error => (e instanceof Error ? e : new Error(Strin
  * A runner that searches in a worker made by `createWorker`: one worker for each run, which ends
  * with the run, however that goes. `result` rejects with an Error when the search fails in the
  * worker (`error`), when the worker script throws or cannot load, when a message of the worker
- * cannot be read, and when no worker can be made. `stop()` asks the worker to end the search at its
- * next report, and the worker answers with its best month, so `result` resolves as for any run.
+ * cannot be read, and when no worker can be made. The messages of these errors are English and for
+ * the console: the screen says only that the run failed. An uncaught error of the worker script is
+ * marked as handled (`preventDefault`), so that the browser does not log it to the page too.
+ * `stop()` asks the worker to end the search at its next report, and the worker answers with its
+ * best month, so `result` resolves as for any run.
  */
 export function makeWorkerRunner(createWorker: () => WorkerLike): GeneratorRunner {
   return (input, onProgress) => {
@@ -92,7 +95,11 @@ export function makeWorkerRunner(createWorker: () => WorkerLike): GeneratorRunne
           else if (data.type === 'done') end(() => resolve(data.result));
           else end(() => reject(new Error(data.message)));
         };
-        worker.onerror = (event) => end(() => reject(new Error(event.message || WORKER_FAILED)));
+        worker.onerror = (event) => {
+          // The error is the run's to report: the browser must not log it to the page as well.
+          event.preventDefault();
+          end(() => reject(new Error(event.message || WORKER_FAILED)));
+        };
         worker.onmessageerror = () => end(() => reject(new Error(WORKER_UNREADABLE)));
         const { ctx, rows, fixed, seed, maxIterations, timeBudgetMs } = input;
         worker.postMessage({ type: 'run', ctx, rows, fixed, seed, maxIterations, timeBudgetMs });

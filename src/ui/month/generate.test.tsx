@@ -16,7 +16,7 @@ import type { GeneratorInput, GeneratorRunner } from '../../worker/runner';
 import { AppProvider, useApp } from '../store';
 import { MonthScreen } from './MonthScreen';
 import { useGenerator } from './useGenerator';
-import type { Generator } from './useGenerator';
+import type { GeneratorControls } from './useGenerator';
 
 // A warning from React, or an error from jsdom, would end up in the output: the tests fail on it.
 let errors: MockInstance;
@@ -130,6 +130,24 @@ const cell = (person: PersonId, date: ISODate) => screen.getByTestId(`cell-${per
 const next = () => userEvent.click(screen.getByText('▶'));
 const previous = () => userEvent.click(screen.getByText('◀'));
 const click = (button: HTMLElement) => userEvent.click(button);
+
+/** The number of broken musts that Kontrola of the shown month states, as `Musí: N`. */
+const kontrolaMusts = (): number =>
+  Number(/^Musí: (\d+)/.exec(screen.getByText(/^Musí: \d+/).textContent ?? '')?.[1]);
+
+/**
+ * The line that tells a run is done, with the number that it states. That number is the one of
+ * Kontrola, `Musí: N`, as it stands now: the test checks they are one.
+ */
+function doneLine(): { line: HTMLElement; musts: number } {
+  const line = screen.getByText(/^Hotovo\. Porušená pravidla: \d+$/);
+  const musts = Number(/(\d+)$/.exec(line.textContent ?? '')?.[1]);
+  expect(musts).toBe(kontrolaMusts());
+  return { line, musts };
+}
+
+/** What a failed run says. What went wrong is in the console (the `errors` spy), not on the page. */
+const FAILED = 'Generování se nepodařilo.';
 
 /** The index in a row of `ctx.days` of `date`, for the run that was started. */
 const dayIndex = (input: GeneratorInput, date: ISODate) =>
@@ -340,7 +358,7 @@ describe('while a run goes on', () => {
     await click(screen.getByRole('button', { name: 'Zastavit' }));
     const rows = withCell(runs[0].input, 'C', '2027-01-04', Code.R1);
     await act(async () => runs[0].finish({ rows, mustUnits: 4 }));
-    expect(screen.getByText('Hotovo. Porušená pravidla: 4')).toBeInTheDocument();
+    expect(doneLine().musts).not.toBe(4); // Kontrola's count, not the search's
     expect(cell('C', '2027-01-04')).toHaveTextContent(/^R1$/);
     expect(generate()).toBeEnabled();
     expect(stopButton()).toBeNull();
@@ -367,8 +385,7 @@ describe('when a run ends', () => {
       generatedAt: '2027-01-04T08:00:20.000Z',
     });
     expect(screen.getByText('Návrh')).toBeInTheDocument();
-    expect(screen.getByText('Hotovo. Porušená pravidla: 3')).toBeInTheDocument();
-    expect(screen.getByText('Hotovo. Porušená pravidla: 3')).not.toHaveAttribute('data-failed');
+    expect(doneLine().line).not.toHaveAttribute('data-failed');
     expect(generate()).toBeEnabled();
   });
 
@@ -407,18 +424,77 @@ describe('when a run ends', () => {
     renderMonth(january(), runner);
     await click(generate());
     await act(async () => runs[0].finish({ mustUnits: 2 }));
-    expect(screen.getByText('Hotovo. Porušená pravidla: 2')).toBeInTheDocument();
+    const { musts } = doneLine();
 
     await next();
     expect(screen.queryByText(/Hotovo/)).toBeNull();
     await previous();
-    expect(screen.getByText('Hotovo. Porušená pravidla: 2')).toBeInTheDocument();
+    expect(doneLine().musts).toBe(musts);
 
     await click(generate());
     expect(screen.queryByText(/Hotovo/)).toBeNull();
     expect(screen.getByText(/Generuji/)).toBeInTheDocument();
     await act(async () => runs[1].finish({ mustUnits: 0 }));
-    expect(screen.getByText('Hotovo. Porušená pravidla: 0')).toBeInTheDocument();
+    expect(doneLine().musts).toBeGreaterThan(0); // the search's 0 is not what it says
+  });
+
+  describe('the number of broken musts that it states', () => {
+    it('is the number of Kontrola for the month, not the count of the search', async () => {
+      const { runner, runs } = controlledRunner();
+      renderMonth(january(), runner);
+      await click(generate());
+      // The search reports 3 units of musts. Kontrola lists a gap for each shift of each day.
+      await act(async () => runs[0].finish({ mustUnits: 3 }));
+      const { musts } = doneLine();
+      expect(musts).not.toBe(3);
+      expect(musts).toBeGreaterThan(100);
+    });
+
+    it('counts the data as it is when the run ends, with the edits made during the run', async () => {
+      const { runner, runs } = controlledRunner();
+      renderMonth(january(), runner);
+      await click(generate());
+      const atStart = kontrolaMusts();
+      // R12 on a Monday and a Tuesday, pinned as the menu of a cell pins: each is a must broken
+      // (M8). The run keeps these cells.
+      const pinned = { code: 'R12', pinned: true } as const;
+      act(() => app.dispatch({ type: 'setCell', date: '2027-01-04', personId: 'C', cell: pinned }));
+      act(() => app.dispatch({ type: 'setCell', date: '2027-01-05', personId: 'D', cell: pinned }));
+      await act(async () => runs[0].finish({ mustUnits: atStart }));
+      expect(stored().cells['2027-01-04']?.C).toEqual(pinned);
+      expect(doneLine().musts).toBe(kontrolaMusts());
+      expect(kontrolaMusts()).not.toBe(atStart);
+    });
+
+    it('follows Kontrola when the plan is edited after the run, and is the number of its month', async () => {
+      const { runner, runs } = controlledRunner();
+      renderMonth(january(), runner);
+      await click(generate());
+      await act(async () => runs[0].finish());
+      const { musts } = doneLine();
+
+      act(() => app.dispatch({ type: 'setCell', date: '2027-01-04', personId: 'C', cell: { code: 'R12' } }));
+      expect(doneLine().musts).toBe(musts + 1); // M8, and nothing else changes
+      await next(); // February has its own count, and the line is not shown there
+      expect(screen.queryByText(/Hotovo/)).toBeNull();
+      await previous();
+      expect(doneLine().musts).toBe(musts + 1);
+    });
+
+    it('is 0 when Kontrola lists no broken must', async () => {
+      const data = january();
+      data.settings.fpdHoursPerWeekday = 0; // nobody is short of hours
+      for (const range of Object.values(data.settings.coverage)) {
+        range.min = 0;
+        range.max = null;
+      }
+      const { runner, runs } = controlledRunner();
+      renderMonth(data, runner);
+      await click(generate());
+      await act(async () => runs[0].finish({ mustUnits: 7 }));
+      expect(screen.getByText('Hotovo. Porušená pravidla: 0')).toBeInTheDocument();
+      expect(kontrolaMusts()).toBe(0);
+    });
   });
 
   it('can run again, each time with a seed of its own and a fresh draft', async () => {
@@ -437,15 +513,19 @@ describe('when a run ends', () => {
     expect(runs[1].input.rows[2][dayIndex(runs[1].input, '2027-01-04')]).toBe(Code.EMPTY);
   });
 
-  it('applies nothing, says what went wrong and allows a new run when the run fails', async () => {
+  it('applies nothing, says that it failed and allows a new run when the run fails', async () => {
     const { runner, runs } = controlledRunner();
     renderMonth(january(), runner);
     const before = stored();
     await click(generate());
-    await act(async () => runs[0].fail(new Error('boom')));
+    const error = new Error('boom');
+    await act(async () => runs[0].fail(error));
 
-    const failure = screen.getByText('Generování se nepodařilo: boom');
+    const failure = screen.getByText(FAILED);
     expect(failure).toHaveAttribute('data-failed'); // the red of a failure
+    expect(screen.queryByText(/boom/)).toBeNull(); // what went wrong is for the console
+    expect(errors.mock.calls).toEqual([[expect.stringContaining('generator'), error]]); // in the console
+    errors.mockClear();
     expect(stored()).toBe(before);
     expect(screen.queryByText(/Hotovo/)).toBeNull();
     expect(screen.queryByText(/Generuji/)).toBeNull();
@@ -453,26 +533,40 @@ describe('when a run ends', () => {
     expect(generate()).toBeEnabled();
 
     await click(generate());
-    expect(screen.queryByText(/Generování se nepodařilo/)).toBeNull(); // gone with the next run
+    expect(screen.queryByText(FAILED)).toBeNull(); // gone with the next run
     expect(runs).toHaveLength(2);
   });
 
-  it('reads a failure that is not an Error too', async () => {
+  it('says the same, in Czech, for a failure that is not an Error or has an English message', async () => {
     const { runner, runs } = controlledRunner();
     renderMonth(january(), runner);
     await click(generate());
     await act(async () => runs[0].fail('no luck'));
-    expect(screen.getByText('Generování se nepodařilo: no luck')).toBeInTheDocument();
+    expect(screen.getByText(FAILED)).toBeInTheDocument();
+    expect(screen.queryByText(/no luck/)).toBeNull();
+    expect(errors.mock.calls).toEqual([[expect.any(String), 'no luck']]); // in the console
+    errors.mockClear();
+
+    await click(generate());
+    await act(async () => runs[1].fail(new Error('The generator worker stopped unexpectedly.')));
+    expect(screen.getByText(FAILED)).toBeInTheDocument();
+    expect(screen.queryByText(/worker/)).toBeNull();
+    expect(errors).toHaveBeenCalledTimes(1);
+    errors.mockClear();
   });
 
   it('fails the same way when the runner cannot start a run at all', async () => {
+    const error = new DOMException('Blocked by policy.', 'SecurityError');
     const runner: GeneratorRunner = () => {
-      throw new Error('no worker');
+      throw error;
     };
     renderMonth(january(), runner);
     const before = stored();
     await click(generate());
-    expect(screen.getByText('Generování se nepodařilo: no worker')).toBeInTheDocument();
+    expect(screen.getByText(FAILED)).toBeInTheDocument();
+    expect(screen.queryByText(/Blocked/)).toBeNull();
+    expect(errors.mock.calls).toEqual([[expect.any(String), error]]);
+    errors.mockClear();
     expect(generate()).toBeEnabled();
     expect(stored()).toBe(before);
   });
@@ -577,7 +671,7 @@ describe('when the data is replaced during a run', () => {
     renderMonth(january(), runner, { storage: storageOpening(january()) });
     await click(generate());
     await act(async () => runs[0].finish({ mustUnits: 2 }));
-    expect(screen.getByText('Hotovo. Porušená pravidla: 2')).toBeInTheDocument();
+    expect(doneLine().line).toBeInTheDocument();
     await act(() => app.openFile());
     expect(screen.queryByText(/Hotovo/)).toBeNull();
   });
@@ -591,7 +685,7 @@ describe('when the data is replaced during a run', () => {
     expect(runs).toHaveLength(2);
     expect(runs[1].input.timeBudgetMs).toBe(9000);
     await act(async () => runs[1].finish({ rows: draft(runs[1].input), mustUnits: 5 }));
-    expect(screen.getByText('Hotovo. Porušená pravidla: 5')).toBeInTheDocument();
+    expect(doneLine().line).toBeInTheDocument();
     expect(stored().cells['2027-01-04']?.C).toEqual({ code: 'R1' });
   });
 
@@ -688,7 +782,7 @@ describe('when the screen goes away during a run', () => {
 // --- The hook by itself ---------------------------------------------------------------------
 
 describe('useGenerator', () => {
-  let generator: Generator;
+  let generator: GeneratorControls;
 
   function GeneratorProbe() {
     generator = useGenerator();
@@ -720,11 +814,9 @@ describe('useGenerator', () => {
     expect(generator.progress?.bestMustUnits).toBe(2);
     expect(generator.percent).toBe(20);
     await act(async () => runs[0].finish({ mustUnits: 1 }));
-    expect(generator).toMatchObject({
-      running: false,
-      progress: null,
-      outcome: { kind: 'done', month: '2027-01', mustUnits: 1 },
-    });
+    expect(generator).toMatchObject({ running: false, progress: null });
+    // how many musts are broken is for the screen to say, from the data as it is then
+    expect(generator.outcome).toEqual({ kind: 'done', month: '2027-01' });
   });
 
   it('starts one run however often it is asked in a row', () => {

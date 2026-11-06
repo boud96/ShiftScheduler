@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { buildMonthGrid } from '../domain/context';
 import { newAppData } from '../domain/defaults';
 import type { SearchProgress, SearchResult } from '../generator/search';
@@ -64,6 +64,11 @@ describe('inProcessRunner', () => {
   });
 });
 
+/** An error event as far as the runner reads it: the message, and `preventDefault` to be watched. */
+function errorEvent(message: string) {
+  return { message, preventDefault: vi.fn() };
+}
+
 /** A worker that does nothing by itself: a test plays its script by calling `emit` and the like. */
 class FakeWorker implements WorkerLike {
   readonly sent: ToWorker[] = [];
@@ -85,9 +90,11 @@ class FakeWorker implements WorkerLike {
     this.onmessage?.({ data: message } as MessageEvent<FromWorker>);
   }
 
-  /** The worker script throws, or fails to load. */
-  crash(message: string): void {
-    this.onerror?.({ message } as ErrorEvent);
+  /** The worker script throws, or fails to load. Returns the event that the browser makes of it. */
+  crash(message: string) {
+    const event = errorEvent(message);
+    this.onerror?.(event as unknown as ErrorEvent);
+    return event;
   }
 
   /** The browser cannot read what the worker posted. */
@@ -224,6 +231,23 @@ describe('makeWorkerRunner', () => {
       expect(workers[0].terminated).toBe(1);
     });
 
+    it('marks the error as handled, so that the browser does not log it a second time', async () => {
+      const { runner, workers } = fakeRunner();
+      const run = runner(input(), () => undefined);
+      const event = workers[0].crash('Uncaught Error: boom');
+      expect(event.preventDefault).toHaveBeenCalledTimes(1);
+      await settled(run.result);
+    });
+
+    it('leaves an error event alone that comes once the run has ended', async () => {
+      const { runner, workers } = fakeRunner();
+      const run = runner(input(), () => undefined);
+      workers[0].emit({ type: 'error', message: 'the search failed' }); // the script's own report
+      await settled(run.result);
+      const late = workers[0].crash('late'); // the run is over, and the handler is gone
+      expect(late.preventDefault).not.toHaveBeenCalled();
+    });
+
     it('rejects with a message of its own when the browser gives none', async () => {
       const { runner, workers } = fakeRunner();
       const run = runner(input(), () => undefined);
@@ -260,7 +284,7 @@ describe('makeWorkerRunner', () => {
       workers[0].emit({ type: 'done', result: found });
       // The worker has been let go, but the browser may still hand over what it had in flight.
       onmessage?.({ data: { type: 'error', message: 'late' } } as MessageEvent<FromWorker>);
-      onerror?.({ message: 'late' } as ErrorEvent);
+      onerror?.(errorEvent('late') as unknown as ErrorEvent);
       onmessageerror?.({} as MessageEvent);
       await expect(run.result).resolves.toBe(found);
       expect(workers[0].terminated).toBe(1);
