@@ -339,6 +339,9 @@ describe('the preview', () => {
       'L 8 (řádek 1, sloupec 3)',
       'L 12-8 (řádek 1, sloupec 4)',
     ]);
+    setText('L 8.30-12\tL 8.5-12'); // a dot for the colon, but the minutes still have two digits
+    expect(summary()).toHaveTextContent(/^Rozpoznáno: 1 · Ignorováno: 1$/);
+    expect(ignored()).toEqual(['L 8.5-12 (řádek 1, sloupec 2)']);
   });
 
   it('is a live region, so that the count is read out when it changes', async () => {
@@ -697,16 +700,18 @@ describe("doctor's notes", () => {
     expect(apply()).toBeDisabled();
   });
 
-  it('copies the note as L on a day without a shift, and the shift on one with', async () => {
+  it('copies the note as L on a day with no code, and the code on a day that has one', async () => {
     const writeText = vi.fn<WriteText>(async () => undefined);
     setClipboard(writeText);
     const data = plan(2);
     put(data, '2027-01-02', 'A', 'R1', true);
     data.doctor['2027-01-02'] = { A: { from: 480, to: 720 } }; // beside a shift
     data.doctor['2027-01-03'] = { A: { from: 510, to: 720 } };
+    put(data, '2027-01-04', 'A', 'DOV');
+    data.doctor['2027-01-04'] = { A: { from: 480, to: 720 } }; // beside an absence
     renderMonth(data);
     await userEvent.click(copyButton('Operátor A'));
-    expect(writeText).toHaveBeenCalledWith(`\tR1\tL 8:30-12${'\t'.repeat(28)}`);
+    expect(writeText).toHaveBeenCalledWith(`\tR1\tL 8:30-12\tDOV${'\t'.repeat(27)}`);
     await screen.findByText(COPIED);
   });
 

@@ -484,13 +484,15 @@ describe('parseDoctor', () => {
     for (const text of ['L', 'L 12-8', 'L 8']) expect(parseDoctor(text), text).toBeNull();
 
     // The forms beyond these (the tables below go through them one by one): spaces around the
-    // cell, a leading zero, 24 as the end of the day, and what is not a time or has text after it.
+    // cell, a leading zero, a dot for the colon, 24 as the end of the day, and what is not a time
+    // or has text after it.
     expect(parseDoctor('  l 08:00 – 12:00  ')).toEqual(MORNING);
+    expect(parseDoctor('L 8.30-12')).toEqual({ from: 510, to: 720 });
+    expect(parseDoctor('L 8.30-12.15')).toEqual({ from: 510, to: 735 });
     expect(parseDoctor('L 8-24')).toEqual({ from: 480, to: 1440 });
     expect(parseDoctor('L 8-24:00')).toEqual({ from: 480, to: 1440 });
-    for (const text of ['L 25-26', 'L 8:5-12', 'L 8-24:30', 'L 8-12 h', 'L 24-25', 'L 8-8']) {
-      expect(parseDoctor(text), text).toBeNull();
-    }
+    const no = ['L 25-26', 'L 8:5-12', 'L 8.5-12', 'L 8-24:30', 'L 8-12 h', 'L 24-25', 'L 8-8'];
+    for (const text of [...no, 'L 8h-12']) expect(parseDoctor(text), text).toBeNull();
   });
 
   it.each<[string, string, DoctorNote]>([
@@ -510,6 +512,14 @@ describe('parseDoctor', () => {
     ['minutes on both times', 'L 8:30-12:45', { from: 510, to: 765 }],
     ['minutes on the end only', 'L 8-12:30', { from: 480, to: 750 }],
     ['minutes with an en dash', 'L 8:00–12:00', MORNING],
+    ['a dot between the hours and the minutes', 'L 8.30-12', { from: 510, to: 720 }],
+    ['a dot on both times', 'L 8.30-12.15', { from: 510, to: 735 }],
+    ['a dot on the end only', 'L 8-12.30', { from: 480, to: 750 }],
+    ['a dot, spaces and an en dash', 'l 8.00 – 12.00', MORNING],
+    ['a dot with a leading zero hour', 'L 08.30-09.45', { from: 510, to: 585 }],
+    ['a dot on one time and a colon on the other', 'L 8:30-12.15', { from: 510, to: 735 }],
+    ['24.00 as the end of the day', 'L 22-24.00', { from: 1320, to: 1440 }],
+    ['the last minute of the day, with a dot', 'L 23.59-24.00', { from: 1439, to: 1440 }],
     ['24 as the end of the day', 'L 22-24', { from: 1320, to: 1440 }],
     ['24:00 as the end of the day', 'L 22-24:00', { from: 1320, to: 1440 }],
     ['the whole day', 'L 0-24', { from: 0, to: 1440 }],
@@ -561,9 +571,21 @@ describe('parseDoctor', () => {
     ['a dash and one time', 'L 8-'],
     ['a dash before the only time', 'L -12'],
     ['a minus before the start', 'L -8-12'],
-    ['a dot between hours and minutes', 'L 8.30-12'],
+    ['one digit of minutes after a dot', 'L 8.5-12'],
+    ['one digit of minutes after a dot, on the end', 'L 8-12.5'],
+    ['an empty minutes part after a dot', 'L 8.-12'],
+    ['three digits of minutes after a dot', 'L 8.300-12'],
+    ['minutes past 59 after a dot', 'L 8.60-12'],
+    ['minutes past 59 after a dot, on the end', 'L 8-12.60'],
+    ['24 with minutes after a dot as the end', 'L 8-24.30'],
+    ['seconds after a dot', 'L 8.30.00-12'],
+    ['a space before the dot', 'L 8 .30-12'],
+    ['a space after the dot', 'L 8. 30-12'],
+    ['a dot after the second time', 'L 8-12.'],
+    ['a dot after the L', 'L. 8-12'],
     ['a comma between hours and minutes', 'L 8,30-12'],
     ['an h after the hours', 'L 8h-12h'],
+    ['an h between hours and minutes', 'L 8h30-12'],
     ['words for the times', 'L dopoledne'],
   ])('reads no note from %s: %j', (_what, text) => {
     expect(parseDoctor(text)).toBeNull();
@@ -612,26 +634,26 @@ describe("copying a row with doctor's notes", () => {
     ]);
   });
 
-  it.each(['R1', 'R2', 'O20', 'O', 'N', 'R12', 'N12'] as const)(
-    'writes the shift %s, not the note beside it',
-    (code) => {
-      const { d, ids } = team();
-      d.cells[jan(1)] = { [ids[0]]: { code } };
-      d.doctor[jan(1)] = { [ids[0]]: MORNING };
-      expect(personRowTsv(d, '2027-01', ids[0]).split('\t')[0]).toBe(code);
-    },
-  );
-
-  // An x and an absence are not a shift, so the day has none: the note is what the cell shows.
-  it.each(['x', 'DOV', 'MD', 'OP', 'NEM'] as const)(
-    'writes the note, not %s, on a day with a note and no shift',
+  // Any code wins, an x and an absence included: the sheet in Excel must show those. The note is in
+  // the copy only on a day that holds no code at all.
+  it.each(['R1', 'R2', 'O20', 'O', 'N', 'R12', 'N12', 'x', 'DOV', 'MD', 'OP', 'NEM'] as const)(
+    'writes the code %s, not the note beside it',
     (code) => {
       const { d, ids } = team();
       d.cells[jan(1)] = { [ids[0]]: { code } };
       d.doctor[jan(1)] = { [ids[0]]: { from: 600, to: 660 } };
-      expect(personRowTsv(d, '2027-01', ids[0]).split('\t')[0]).toBe('L 10-11');
+      expect(personRowTsv(d, '2027-01', ids[0]).split('\t')[0]).toBe(code);
     },
   );
+
+  it('writes the note on a day that holds no code, and nothing on a day with neither', () => {
+    const { d, ids } = team();
+    d.doctor[jan(2)] = { [ids[0]]: { from: 600, to: 660 } };
+    d.cells[jan(4)] = { [ids[1]]: { code: 'DOV' } }; // somebody else's
+    expect(personRowTsv(d, '2027-01', ids[0]).split('\t').slice(0, 4)).toEqual([
+      '', 'L 10-11', '', '',
+    ]);
+  });
 
   it('holds only that person and only that month, notes included', () => {
     const { d, ids } = team();
@@ -665,6 +687,15 @@ describe("planPaste, doctor's notes", () => {
     expect(plan.doctorWrites.map((w) => w.note)).toEqual(Array(4).fill(MORNING));
     expect(plan.writes).toEqual([]);
     expect(plan.ignored).toEqual([]);
+  });
+  it('reads a dot between hours and minutes as a colon, and still wants two digits', () => {
+    const { d, ids } = team();
+    const plan = planJan(d, ids[0], jan(1), 'L 8.30-12\tL 8.30-12.15\tL 8.5-12');
+    expect(plan.doctorWrites).toEqual([
+      { personId: ids[0], date: jan(1), note: { from: 510, to: 720 } },
+      { personId: ids[0], date: jan(2), note: { from: 510, to: 735 } },
+    ]);
+    expect(plan.ignored).toEqual([{ row: 0, col: 2, value: 'L 8.5-12' }]);
   });
   it('goes down the rows to the next people, as a code does', () => {
     const { d, ids } = team();
@@ -996,6 +1027,10 @@ describe("copy a row with doctor's notes, paste it back", () => {
       d.cells[jan(3)] = { [source]: { code: 'x' } };
       d.doctor[jan(4)] = { [source]: { from: 510, to: 720 } };
       d.cells[jan(5)] = { [source]: { code: 'DOV' } };
+      d.cells[jan(6)] = { [source]: { code: 'NEM' } };
+      d.doctor[jan(6)] = { [source]: MORNING }; // beside an absence: the copy carries the absence
+      d.cells[jan(7)] = { [source]: { code: 'x' } };
+      d.doctor[jan(7)] = { [source]: MORNING }; // beside an x: the same
       d.cells[jan(9)] = { [source]: { code: 'N12' } };
       d.doctor[jan(9)] = { [source]: MORNING }; // beside a shift: the copy carries the shift only
       d.doctor[jan(31)] = { [source]: { from: 0, to: 1440 } };
@@ -1009,8 +1044,10 @@ describe("copy a row with doctor's notes, paste it back", () => {
       expect(out.doctor[jan(4)][target]).toStrictEqual({ from: 510, to: 720 });
       expect(out.doctor[jan(31)][target]).toStrictEqual({ from: 0, to: 1440 });
       expect(out.cells[jan(9)][target]).toStrictEqual({ code: 'N12', pinned: true });
-      // The note beside a shift is not in the copy: it stays behind.
-      expect(out.doctor[jan(9)]?.[target]).toBeUndefined();
+      // The absence, the x and the shift come back as they are; the notes beside them stay behind.
+      expect(out.cells[jan(6)][target]).toStrictEqual({ code: 'NEM' });
+      expect(out.cells[jan(7)][target]).toStrictEqual({ code: 'x' });
+      for (const day of [6, 7, 9]) expect(out.doctor[jan(day)]?.[target]).toBeUndefined();
       expect(out.doctor[jan(1)]?.[target]).toStrictEqual(first === 'a note' ? MORNING : undefined);
     },
   );

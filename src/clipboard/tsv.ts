@@ -13,20 +13,29 @@ import type {
 } from '../domain/types';
 
 /**
- * An `L`, the time the appointment starts, a hyphen or an en dash, the time it ends. A time is the
- * hours (0 to 23, with or without a leading zero) and, if given, a colon and the minutes (two
- * digits, 00 to 59). The end may also be 24, which `parseDoctor` lets through with no minutes only.
- * Spaces may follow the L and surround the dash.
+ * The minutes of a time, if it has them: two digits after a colon or a dot, as `8:30` and `8.30`
+ * are both written in Czech.
  */
-const DOCTOR = /^L\s*([01]?\d|2[0-3])(?::([0-5]\d))?\s*[-–]\s*(2[0-4]|[01]?\d)(?::([0-5]\d))?$/i;
+const MINUTES = String.raw`(?:[:.]([0-5]\d))?`;
+
+/**
+ * An `L`, the time the appointment starts, a hyphen or an en dash, the time it ends. A time is the
+ * hours (0 to 23, with or without a leading zero) and, if given, the minutes (`MINUTES`). The end
+ * may also be 24, which `parseDoctor` lets through with no minutes only. Spaces may follow the L
+ * and surround the dash.
+ */
+const DOCTOR = new RegExp(
+  String.raw`^L\s*([01]?\d|2[0-3])${MINUTES}\s*[-–]\s*(2[0-4]|[01]?\d)${MINUTES}$`,
+  'i',
+);
 
 /**
  * Reads a doctor's appointment as the team lead writes it in Excel, `L` with its time: `L 8-12`,
- * `L8-12`, `l 8:30 - 12:00` or `L 8–12`. The spaces around the cell are ignored, as for a code.
- * Anything else gives null, so that a cell which is no note is left out and not guessed at: a bare
- * `L`, one time only, an end that is not after the start (a note is a stretch of one day), hours
- * past 23 (24 is the end of the day, and allowed as the end only), minutes that are not two digits
- * from 00 to 59, and text before the `L` or after the second time.
+ * `L8-12`, `l 8:30 - 12:00`, `L 8.30-12` or `L 8–12`. The spaces around the cell are ignored, as
+ * for a code. Anything else gives null, so that a cell which is no note is left out and not guessed
+ * at: a bare `L`, one time only, an end that is not after the start (a note is a stretch of one
+ * day), hours past 23 (24 is the end of the day, and allowed as the end only), minutes that are not
+ * two digits from 00 to 59 (`8.5`, `8h30`), and text before the `L` or after the second time.
  */
 export function parseDoctor(value: string): DoctorNote | null {
   const match = DOCTOR.exec(value.trim());
@@ -38,32 +47,28 @@ export function parseDoctor(value: string): DoctorNote | null {
 
 /**
  * A doctor's note as the team lead writes it in Excel, which `parseDoctor` reads back: `L 8-12`,
- * `L 8:30-12`. The times are those of `clock` with the `:00` of a whole hour left off, and the end
- * of the day is 24.
+ * `L 8:30-12`. The times are those of `clock` (a colon, not a dot) with the `:00` of a whole hour
+ * left off, and the end of the day is 24.
  */
 export function formatDoctor(note: DoctorNote): string {
   const time = (minutes: number): string => clock(minutes).replace(/:00$/, '');
   return `L ${time(note.from)}-${time(note.to)}`;
 }
 
-/** Whether the name of a code is that of a shift, not of an absence or an x. */
-function isShiftName(name: string): boolean {
-  const code = codeFromName(name);
-  return code !== null && isShift(code);
-}
-
 /**
  * One person's month as a row to paste into Excel: the code of each day, x and absences included,
  * or nothing on an empty day, separated by tabs. Pinned or not, a shift is just its name. A day
- * without a shift that has a doctor's note gives the note instead (`L 8-12`, see `formatDoctor`),
- * since a cell in Excel holds one of the two; a day with a shift gives the shift.
+ * with a doctor's note and no code gives the note instead (`L 8-12`, see `formatDoctor`). A cell in
+ * Excel holds one thing and a code comes first, so that the sheet shows the x and the absences; the
+ * note of a day that has a code stays in the app.
  */
 export function personRowTsv(data: AppData, month: MonthKey, personId: PersonId): string {
   return monthDays(month, data.settings)
     .map(({ date }) => {
-      const code = data.cells[date]?.[personId]?.code ?? '';
+      const cell = data.cells[date]?.[personId];
+      if (cell !== undefined) return cell.code;
       const note = data.doctor[date]?.[personId];
-      return note !== undefined && !isShiftName(code) ? formatDoctor(note) : code;
+      return note === undefined ? '' : formatDoctor(note);
     })
     .join('\t');
 }
@@ -178,7 +183,8 @@ export function planPaste(
 
 /** A pasted shift is pinned, so that generating again keeps it; x and absences are fixed anyway. */
 function storedCell(code: CodeName): StoredCell {
-  return isShiftName(code) ? { code, pinned: true } : { code };
+  const c = codeFromName(code);
+  return c !== null && isShift(c) ? { code, pinned: true } : { code };
 }
 
 /**
