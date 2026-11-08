@@ -1209,6 +1209,130 @@ describe('the totals of a person', () => {
     });
   });
 
+  describe('show the 12h figure as the counted shifts plus the claimed holiday shifts', () => {
+    /** The 12h figure of person `id`, found by its title. */
+    const figure = (id: PersonId, title = '12h') =>
+      within(screen.getByTestId(`totals-${id}`)).getByTitle(title);
+    const CLAIMED = (n: number) => `12h (z toho navíc zamluvené svátky: ${n})`;
+
+    it('as the plain count, with the plain title, when no holiday shift is claimed', () => {
+      const data = plan(2);
+      for (const date of ['2027-01-02', '2027-01-03']) put(data, date, 'A', 'R12');
+      put(data, '2027-01-09', 'A', 'R12', true); // pinned, but not on a holiday
+      put(data, '2027-01-01', 'B', 'N12'); // on a holiday, but not pinned
+      renderMonth(data);
+      expect(figure('A')).toHaveTextContent(/^3$/);
+      expect(figure('B')).toHaveTextContent(/^1$/);
+      expect(within(screen.getByTestId('totals-A')).queryByText(/\+/)).toBeNull();
+    });
+
+    it('as 3+1 for three shifts and one claimed holiday shift, and says what the +1 is', () => {
+      const data = plan(2);
+      put(data, '2027-01-01', 'A', 'R12', true); // New Year's Day, entered by hand: claimed
+      for (const date of ['2027-01-09', '2027-01-16', '2027-01-23']) put(data, date, 'A', 'R12');
+      renderMonth(data);
+      expect(figure('A', CLAIMED(1))).toHaveTextContent(/^3\+1$/);
+      expect(within(screen.getByTestId('totals-A')).queryByTitle('12h')).toBeNull();
+      expect(figure('B')).toHaveTextContent(/^0$/); // and the others read as they did
+      // Four 12-hour shifts, one of them claimed: Kontrola lists no M5 for A.
+      expect(checks().queryByText(/dvanáctihodinové směny \(max/)).toBeNull();
+      expect(figure('A', CLAIMED(1))).not.toHaveClass('below-weekend'); // 3 are counted: enough
+    });
+
+    it('as 0+2 and in red for claimed holidays alone: they count toward nothing', () => {
+      const data = plan(2);
+      put(data, '2027-03-26', 'A', 'R12', true); // Good Friday
+      put(data, '2027-03-29', 'A', 'N12', true); // Easter Monday
+      renderMonth(data, '2027-03');
+      expect(figure('A', CLAIMED(2))).toHaveTextContent(/^0\+2$/);
+      expect(figure('A', CLAIMED(2))).toHaveClass('below-weekend');
+      expect(checks().getByText('Operátor A: 0 víkendových směn (min. 2)')).toBeVisible();
+    });
+
+    it('with each edit', async () => {
+      const data = plan(1);
+      put(data, '2027-01-01', 'A', 'R12', true);
+      renderMonth(data);
+      expect(figure('A', CLAIMED(1))).toHaveTextContent(/^0\+1$/);
+      await choose('A', '2027-01-09', 'R12');
+      expect(figure('A', CLAIMED(1))).toHaveTextContent(/^1\+1$/);
+      await choose('A', '2027-01-01', 'Vymazat');
+      expect(figure('A')).toHaveTextContent(/^1$/);
+    });
+  });
+
+  describe('mark the 12h figure in red when it is below the weekend minimum', () => {
+    const twelve = (id: PersonId) => within(screen.getByTestId(`totals-${id}`)).getByTitle('12h');
+
+    it('and only then: not at the minimum, not above it', () => {
+      const data = plan(4);
+      putNote(data, MONDAY, 'D', 480, 720); // a note changes nothing here
+      put(data, '2027-01-02', 'B', 'R12');
+      put(data, '2027-01-09', 'B', 'R12');
+      for (const date of ['2027-01-02', '2027-01-09', '2027-01-16']) put(data, date, 'C', 'N12');
+      put(data, '2027-01-02', 'A', 'R12'); // one: below the minimum of 2
+      renderMonth(data); // D has none
+      expect(twelve('A')).toHaveClass('below-weekend');
+      expect(twelve('B')).not.toHaveClass('below-weekend');
+      expect(twelve('C')).not.toHaveClass('below-weekend');
+      expect(twelve('D')).toHaveClass('below-weekend');
+    });
+
+    it('as the rule M12 does, which no cell shows: the figure, not a cell, turns red', () => {
+      renderMonth(plan(2)); // both are below the minimum, and Kontrola lists M12 for both
+      const lines = checks().getAllByRole('button', { name: /víkendových směn \(min\. 2\)$/ });
+      expect(lines).toHaveLength(2);
+      expect(twelve('A')).toHaveClass('below-weekend');
+      expect(twelve('B')).toHaveClass('below-weekend');
+      expect(document.querySelectorAll('.month-cell.must')).toHaveLength(0);
+    });
+
+    it('as the minimum in the settings says: none at 0, the person with 2 at 3', () => {
+      const data = plan(2);
+      data.settings.minWeekendShifts = 0;
+      put(data, '2027-01-02', 'B', 'R12');
+      put(data, '2027-01-09', 'B', 'R12');
+      const first = renderMonth(data);
+      expect(twelve('A')).not.toHaveClass('below-weekend');
+      expect(checks().queryByText(/víkendových směn/)).toBeNull();
+      first.unmount();
+
+      data.settings.minWeekendShifts = 3;
+      renderMonth(data);
+      expect(twelve('B')).toHaveClass('below-weekend');
+      expect(checks().getByText('Operátor B: 2 víkendové směny (min. 3)')).toBeVisible();
+    });
+
+    it('with each edit', async () => {
+      const data = plan(1);
+      put(data, '2027-01-02', 'A', 'R12');
+      renderMonth(data);
+      expect(twelve('A')).toHaveClass('below-weekend');
+      await choose('A', '2027-01-09', 'R12');
+      expect(twelve('A')).not.toHaveClass('below-weekend');
+      await choose('A', '2027-01-09', 'Vymazat');
+      expect(twelve('A')).toHaveClass('below-weekend');
+    });
+
+    it('in the red of the hours, by the rule of the style sheet that they share', () => {
+      // jsdom does not load the style sheet, so this reads it: both classes are in one rule.
+      const css = readFileSync(join(import.meta.dirname, '../styles.css'), 'utf8');
+      const rule = /\.below-fpd,\s*\.month-totals-grid \.below-weekend\s*\{([^}]*)\}/.exec(css);
+      expect(rule?.[1]).toContain('color: var(--danger-text)');
+    });
+
+    it('apart from the hours, which are red for FPD alone', () => {
+      const data = plan(1);
+      data.months['2027-01'] = { status: 'draft', hoursAdjust: { A: -150 } }; // FPD 7,5 h
+      put(data, '2027-01-04', 'A', 'R1'); // at FPD, and no weekend shift
+      renderMonth(data);
+      const totals = within(screen.getByTestId('totals-A'));
+      expect(totals.getByTitle('12h')).toHaveClass('below-weekend');
+      expect(totals.getByTitle('Hodiny / FPD')).not.toHaveClass('below-fpd');
+      expect(totals.getByTitle('Hodiny / FPD')).not.toHaveClass('below-weekend');
+    });
+  });
+
   it('use the days that the person is in the team for the FPD', () => {
     const data = plan(2);
     data.people[1].activeFrom = '2027-01-15'; // Mon-Fri days from the 15th: 11 of them

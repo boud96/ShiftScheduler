@@ -564,8 +564,10 @@ h1 {
   text-align: left;
 }
 
-/* The hours of a person below their FPD: a must without a day, so no cell is red for it. */
-.month-totals-grid .below-fpd {
+/* The hours of a person below their FPD, and their 12h figure when they are below the minimum of
+   weekend shifts: musts without a day, so no cell is red for them. */
+.month-totals-grid .below-fpd,
+.month-totals-grid .below-weekend {
   font-weight: 600;
   color: var(--danger-text);
 }

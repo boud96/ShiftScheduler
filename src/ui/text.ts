@@ -118,8 +118,18 @@ export const MONTH_SCREEN = {
     `FPD ${fpd} h · ${workdays} pracovních dní · ${twelveDays} dnů s 12h směnami`,
   coverage: 'Obsazeno',
   covered: '✓',
-  /** The columns of the totals of a person. */
-  totals: { hours: 'Hodiny / FPD', overtime: 'Přesčas', twelve: '12h', nights: 'Noci' },
+  /**
+   * The columns of the totals of a person. A person with claimed holiday shifts has `twelveClaimed`
+   * for the title of the 12h figure: `claimed` of the shifts are extra, and count toward nothing.
+   */
+  totals: {
+    hours: 'Hodiny / FPD',
+    overtime: 'Přesčas',
+    twelve: '12h',
+    twelveClaimed: (claimed: number): string =>
+      `12h (z toho navíc zamluvené svátky: ${claimed})`,
+    nights: 'Noci',
+  },
   menu: { clear: 'Vymazat', pin: 'Připnout', unpin: 'Odepnout', doctor: 'Lékař…' },
   pinned: '📌',
   /** A doctor's appointment (code L): the marker in a cell, and the form that the menu opens. */

@@ -38,20 +38,44 @@ function problemsOf(findings: readonly Finding[]): Map<number, string> {
   return new Map([...said].map(([day, messages]) => [day, messages.join(', ')]));
 }
 
+/**
+ * The people who are below the minimum of weekend shifts, as the engine judges it: the indices of
+ * the people that rule M12 names. The finding has no day, so no cell marks it.
+ */
+function belowWeekendMinimum(findings: readonly Finding[]): Set<number> {
+  const short = new Set<number>();
+  for (const finding of findings) {
+    if (finding.rule === 'M12' && finding.person !== null) short.add(finding.person);
+  }
+  return short;
+}
+
 /** The classes that the head, the cells and the coverage of a day share. */
 function dayClasses(day: DayInfo): (string | false)[] {
   return [!day.inMonth && 'tail', day.dayType === 'twelve' && 'twelve'];
+}
+
+interface TotalsProps {
+  id: PersonId;
+  stats: PersonStats;
+  fpd: number;
+  /** Whether the engine finds the person below the minimum of weekend shifts (M12). */
+  belowWeekend: boolean;
 }
 
 /**
  * The totals of a person: hours against FPD, overtime, 12-hour shifts, nights, each shift. The
  * hours are red when they are below FPD: the finding of that (M6) names no day, so it marks no
  * cell, and this figure is where it shows. It is below as M6 judges it, not by a rounding error.
+ * The 12h figure is red likewise when the person is below the weekend minimum (M12), which names
+ * no day either. A claimed holiday shift counts toward neither limit, so with any the figure is
+ * the counted shifts plus the claimed ones, `3+1`, and its title says what the extra ones are.
  */
-function Totals({ id, stats, fpd }: { id: PersonId; stats: PersonStats; fpd: number }) {
+function Totals({ id, stats, fpd, belowWeekend }: TotalsProps) {
   const { totals } = MONTH_SCREEN;
   const shifts = WEEKDAY_CODES.map((code, k) => `${CODE_NAMES[code]} ${stats.perShift[k]}`);
   const below = fpd - stats.hours > FPD_TOLERANCE;
+  const claimed = stats.claimedTwelve;
   return (
     <td className="month-totals" data-testid={`totals-${id}`}>
       <div className="month-totals-grid">
@@ -59,7 +83,12 @@ function Totals({ id, stats, fpd }: { id: PersonId; stats: PersonStats; fpd: num
           {`${fmtH(stats.hours)} / ${fmtH(fpd)}`}
         </span>{' '}
         <span title={totals.overtime}>{fmtH(stats.hours - fpd)}</span>{' '}
-        <span title={totals.twelve}>{stats.twelve}</span>{' '}
+        <span
+          title={claimed > 0 ? totals.twelveClaimed(claimed) : totals.twelve}
+          className={classes(belowWeekend && 'below-weekend')}
+        >
+          {claimed > 0 ? `${stats.twelve - claimed}+${claimed}` : stats.twelve}
+        </span>{' '}
         <span title={totals.nights}>{stats.nights}</span>{' '}
         <small className="month-totals-shifts">{shifts.join(' · ')}</small>
       </div>
@@ -100,6 +129,7 @@ export function Grid(props: GridProps) {
   const { onCell, onChoose, onCloseMenu, onCopyRow } = props;
   const { ctx } = grid;
   const problems = problemsOf(evaluation.findings);
+  const belowWeekend = belowWeekendMinimum(evaluation.findings);
   /** The button of the cell whose menu is open. */
   const anchor = useRef<HTMLButtonElement>(null);
 
@@ -215,7 +245,12 @@ export function Grid(props: GridProps) {
                 </div>
               </th>
               {ctx.days.map((_, i) => renderCell(p, i))}
-              <Totals id={personId} stats={evaluation.persons[p]} fpd={ctx.people[p].fpd} />
+              <Totals
+                id={personId}
+                stats={evaluation.persons[p]}
+                fpd={ctx.people[p].fpd}
+                belowWeekend={belowWeekend.has(p)}
+              />
             </tr>
           ))}
           <tr className="month-coverage">
