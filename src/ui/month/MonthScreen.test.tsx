@@ -8,6 +8,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { MockInstance } from 'vitest';
 import { buildMonthGrid } from '../../domain/context';
 import { newAppData } from '../../domain/defaults';
+import * as engine from '../../domain/rules/evaluate';
 import { evaluateMonth } from '../../domain/rules/evaluate';
 import type { Finding } from '../../domain/rules/types';
 import type { AppData, CodeName, ISODate, MonthKey, PersonId, WishId } from '../../domain/types';
@@ -16,6 +17,7 @@ import { syntheticTeam } from '../../test/team';
 import { inProcessRunner } from '../../worker/runner';
 import { App } from '../App';
 import { AppProvider, useApp } from '../store';
+import { minutesOf } from './CellMenu';
 import { checksOf } from './ChecksPanel';
 import { MonthScreen } from './MonthScreen';
 
@@ -908,6 +910,40 @@ describe("the doctor's note", () => {
     expect(cell('A', MONDAY)).toHaveFocus();
   });
 
+  it('does not leave on a Tab that stays in a box, as between the parts of one', async () => {
+    renderMonth(plan(2));
+    await openForm('A', MONDAY);
+    await typeTimes('08:00', '12:00');
+    act(() => fromBox().focus());
+    // A browser moves from the hour to the minute of a box, and back, with the focus on the box.
+    // jsdom has no parts in a time box: the key is pressed, and the focus stays where it is.
+    fireEvent.keyDown(fromBox(), { key: 'Tab', shiftKey: true });
+    fireEvent.keyDown(fromBox(), { key: 'Tab' });
+    expect(dialog()).toBeInTheDocument();
+    expect(fromBox()).toHaveValue('08:00');
+    expect(toBox()).toHaveValue('12:00');
+  });
+
+  it('closes when the focus goes out of it, and leaves the focus where it went', async () => {
+    renderMonth(plan(2));
+    await openForm('A', MONDAY);
+    await typeTimes('08:00', '12:00');
+    act(() => cell('B', MONDAY).focus());
+    expect(screen.queryByRole('dialog')).toBeNull();
+    expect(cell('B', MONDAY)).toHaveFocus();
+    expect(storedNote(MONDAY, 'A')).toBeUndefined(); // closing is no saving
+  });
+
+  it('stays open when the focus goes to no element of the page, and Escape closes it', async () => {
+    renderMonth(plan(2));
+    await openForm('A', MONDAY);
+    (document.activeElement as HTMLElement).blur(); // as when another window is switched to
+    expect(document.body).toHaveFocus();
+    expect(dialog()).toBeInTheDocument();
+    await userEvent.keyboard('{Escape}');
+    expect(screen.queryByRole('dialog')).toBeNull();
+  });
+
   it('closes on a click outside', async () => {
     renderMonth(plan(2));
     await openForm('A', MONDAY);
@@ -985,6 +1021,32 @@ describe("the doctor's note", () => {
   });
 });
 
+describe('the times of the form of a note', () => {
+  it.each([
+    ['00:00', 0],
+    ['08:00', 480],
+    ['12:30', 750],
+    ['23:00', 1380],
+    ['23:59', 1439],
+  ])('reads %s as %i minutes after midnight', (text, minutes) => {
+    expect(minutesOf(text)).toBe(minutes);
+  });
+
+  it.each([
+    ['nothing', ''],
+    ['an hour past 23', '24:00'],
+    ['an hour and minutes past the day', '25:61'],
+    ['minutes past 59', '08:60'],
+    ['an hour of one digit', '8:00'],
+    ['minutes of one digit', '08:0'],
+    ['seconds', '08:00:30'],
+    ['no digits', 'ab:cd'],
+    ['a space', ' 08:00'],
+  ])('reads no time from %s', (_what, text) => {
+    expect(minutesOf(text)).toBeNull();
+  });
+});
+
 describe('where the menu sits', () => {
   type Box = { top: number; left: number; width: number; height: number };
   /** jsdom has no layout: this gives the cells and the menu the boxes that a test asks for. */
@@ -1028,25 +1090,55 @@ describe('where the menu sits', () => {
     expect(menuStyle().left).toBe('8px');
   });
 
-  it('puts the form of a note beside the cell again, being smaller than the list', async () => {
-    // The list is 300 px high and the form 100, in a window that is 768 px high. Neither fits
-    // below a cell at 700, so each ends 4 px above it.
+  /**
+   * The list is 300 px high, the form 100 px, and 40 px more while it shows its message, and the
+   * cell is at `cellTop`. The window of jsdom is 768 px high.
+   */
+  function layoutOfForm(cellTop: number) {
     vi.spyOn(Element.prototype, 'getBoundingClientRect').mockImplementation(function (
       this: Element,
     ) {
       const role = this.getAttribute('role');
+      const message = this.querySelector('[role="alert"]') !== null;
       const [top, height] = this.getAttribute('data-testid')?.startsWith('cell-')
-        ? [700, 30]
-        : [0, role === 'menu' ? 300 : role === 'dialog' ? 100 : 0];
+        ? [cellTop, 30]
+        : [0, role === 'menu' ? 300 : role === 'dialog' ? (message ? 140 : 100) : 0];
       const width = role === null ? 34 : 120;
       return { top, left: 200, width, height, bottom: top + height, right: 200 + width } as DOMRect;
     });
+  }
+
+  it('puts the form of a note beside the cell again, being smaller than the list', async () => {
+    layoutOfForm(700); // neither fits below it, so each ends 4 px above it
     renderMonth(plan(1));
     await userEvent.click(cell('A', MONDAY));
     expect(menuStyle().top).toBe('396px'); // 700 - 4 - 300
     await userEvent.click(item('Lékař…'));
     expect(screen.getByRole('dialog').style.top).toBe('596px'); // 700 - 4 - 100, not 396 again
     expect(screen.getByRole('dialog').style.left).toBe('200px');
+  });
+
+  it('puts the form beside the cell again when its message makes it taller', async () => {
+    layoutOfForm(600); // 634 + 100 fits in the window, and 634 + 140 does not
+    renderMonth(plan(1));
+    await userEvent.click(cell('A', MONDAY));
+    await userEvent.click(item('Lékař…'));
+    expect(screen.getByRole('dialog').style.top).toBe('634px'); // under the cell
+    await userEvent.click(screen.getByRole('button', { name: 'Uložit lékaře' })); // no times
+    expect(screen.getByRole('alert')).toBeInTheDocument();
+    expect(screen.getByRole('dialog').style.top).toBe('456px'); // above it: 600 - 4 - 140
+  });
+
+  it('puts the form back where it was when the message goes', async () => {
+    layoutOfForm(600);
+    renderMonth(plan(1));
+    await userEvent.click(cell('A', MONDAY));
+    await userEvent.click(item('Lékař…'));
+    await userEvent.click(screen.getByRole('button', { name: 'Uložit lékaře' }));
+    expect(screen.getByRole('dialog').style.top).toBe('456px');
+    await userEvent.type(screen.getByLabelText('od'), '08:00'); // a change takes the message away
+    expect(screen.queryByRole('alert')).toBeNull();
+    expect(screen.getByRole('dialog').style.top).toBe('634px');
   });
 
   it('closes when the window is resized', async () => {
@@ -1747,6 +1839,17 @@ describe('the checks of a month', () => {
       'brzy',
       'přesčas 1 h',
     ]);
+  });
+
+  it('take the order of the tiers from the engine, not from a copy of its rule', () => {
+    const must: Finding = { ...finding, rule: 'M6', severity: 'must', message: 'chybí h' };
+    const strong: Finding = { ...finding, rule: 'S1', strong: true, message: 'noční' };
+    // The engine with its tiers turned round: wishes, then strong wishes, then musts.
+    const real = engine.tier;
+    vi.spyOn(engine, 'tier').mockImplementation((f) => 2 - real(f));
+    const checks = checksOf([must, strong, finding], ctx(), names);
+    const messages = checks.map((check) => check.finding.message);
+    expect(messages).toEqual(['přesčas 1 h', 'noční', 'chybí h']);
   });
 
   it('leave out the quiet findings and put the musts first', () => {

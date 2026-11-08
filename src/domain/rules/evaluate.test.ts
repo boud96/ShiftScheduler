@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
 import { ctxFor, rowsOf } from '../../test/rulekit';
-import { evaluateMonth } from './evaluate';
+import { evaluateMonth, tier } from './evaluate';
 import type { Finding } from './types';
 
 // evaluateDay is replaced by one that reports a wish, with the message 'wish', on day 1 of the
@@ -63,5 +63,33 @@ describe('evaluateMonth order of findings', () => {
     expect(new Set(tiers)).toEqual(new Set([0, 1, 2]));
     const wishAt = ev.findings.findIndex((f) => f.message === 'wish');
     expect(wishAt).toBeGreaterThan(ev.findings.indexOf(strong[1]));
+  });
+});
+
+describe('tier', () => {
+  const finding = (patch: Partial<Finding>): Finding => ({
+    rule: 'W1',
+    severity: 'wish',
+    person: 0,
+    days: [],
+    message: '',
+    penalty: 1,
+    ...patch,
+  });
+
+  // The checks list takes its order from this: the engine sorts by it, and so does Kontrola.
+  it('puts a must before a strong wish, and a strong wish before any other wish', () => {
+    const must = tier(finding({ rule: 'M6', severity: 'must' }));
+    const strong = tier(finding({ rule: 'S1', strong: true }));
+    const wish = tier(finding({}));
+    expect(must).toBeLessThan(strong);
+    expect(strong).toBeLessThan(wish);
+  });
+
+  it('is the same for every wish that is not strong, and for every must', () => {
+    expect(tier(finding({ rule: 'W10' }))).toBe(tier(finding({ rule: 'W1' })));
+    expect(tier(finding({ rule: 'M12', severity: 'must' }))).toBe(
+      tier(finding({ rule: 'M1', severity: 'must' })),
+    );
   });
 });

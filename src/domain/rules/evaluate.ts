@@ -24,8 +24,11 @@ function firstDay(f: Finding): number {
   return f.days.length > 0 ? Math.min(...f.days) : Infinity;
 }
 
-/** 0 for a must, 1 for a strong wish, 2 for any other wish: the order of the checks list. */
-function tier(f: Finding): number {
+/**
+ * 0 for a must, 1 for a strong wish, 2 for any other wish: the order of the checks list. The list
+ * of Kontrola sorts by it too, so that the order is kept in one place.
+ */
+export function tier(f: Finding): number {
   return f.severity === 'must' ? 0 : f.strong === true ? 1 : 2;
 }
 

@@ -198,6 +198,15 @@ describe('setDoctor', () => {
   });
 
   it.each([
+    ['the first minute of the day', { from: 0, to: 1 }],
+    ['the whole day', { from: 0, to: 1440 }],
+    ['the last minute of the day', { from: 1439, to: 1440 }],
+  ])('stores a note that is at the edge of the day: %s', (_what, note) => {
+    const next = set(planWithNotes(), '2027-01-04', 'p1', note);
+    expect(next.doctor).toStrictEqual({ '2027-01-04': { p1: note } });
+  });
+
+  it.each([
     ['one that ends where it starts', { from: 480, to: 480 }],
     ['one that ends before it starts', { from: 720, to: 480 }],
     ['one that starts before midnight', { from: -1, to: 60 }],

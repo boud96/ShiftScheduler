@@ -1,6 +1,7 @@
-import { useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
 import type {
   ChangeEvent,
+  FocusEvent as ReactFocusEvent,
   FormEvent,
   KeyboardEvent as ReactKeyboardEvent,
   RefObject,
@@ -34,9 +35,13 @@ function inputTime(minutes: number): string {
   return clock(Math.min(minutes, 24 * 60 - 1)).padStart(5, '0');
 }
 
-/** The minutes from midnight of the `HH:MM` in a time box, or null for a box with no time in it. */
-function minutesOf(value: string): number | null {
-  const match = /^(\d{2}):(\d{2})$/.exec(value);
+/**
+ * The minutes from midnight of the `HH:MM` in a time box, or null for a box with no time of the
+ * day in it: nothing, an hour past 23, or minutes past 59. A browser gives nothing for a time
+ * that is not one, but a note that the reducer would not store must not be sent to it either.
+ */
+export function minutesOf(value: string): number | null {
+  const match = /^([01]\d|2[0-3]):([0-5]\d)$/.exec(value);
   return match === null ? null : Number(match[1]) * 60 + Number(match[2]);
 }
 
@@ -93,9 +98,12 @@ export function CellMenu(props: CellMenuProps) {
   const [editingNote, setEditingNote] = useState(false);
   const shifts = dayType === 'weekday' ? WEEKDAY_CODES : TWELVE_CODES;
 
-  // Before the page is painted, so that the menu is not seen where it would otherwise be. Again
-  // when the form takes the place of the list: it is not the same size, so it needs its own place.
-  useLayoutEffect(() => {
+  /**
+   * Puts the menu beside its cell: below it, or above it when there is no room below, and in the
+   * window at the sides. It measures the menu as it is now, so it is to be called again when the
+   * menu changes its size.
+   */
+  const place = useCallback(() => {
     const menu = box.current;
     const cell = anchor.current;
     if (menu === null || cell === null) return;
@@ -108,7 +116,12 @@ export function CellMenu(props: CellMenuProps) {
     const left = Math.max(MARGIN, Math.min(at.left, window.innerWidth - size.width - MARGIN));
     menu.style.top = `${top}px`;
     menu.style.left = `${left}px`;
-  }, [anchor, editingNote]);
+  }, [anchor]);
+
+  // Before the page is painted, so that the menu is not seen where it would otherwise be. The form
+  // of the note is not the size of the list, and its message makes it taller: it places itself
+  // again, as it appears and with each change of the message (`DoctorForm`).
+  useLayoutEffect(place, [place]);
 
   useEffect(() => {
     box.current?.querySelector<HTMLElement>('[role="menuitem"]')?.focus({ preventScroll: true });
@@ -164,7 +177,8 @@ export function CellMenu(props: CellMenuProps) {
           note={doctor}
           onSave={(note) => choose({ type: 'doctor', note })}
           onRemove={() => choose({ type: 'doctor', note: null })}
-          onLeave={() => onClose(true)}
+          onLeave={onClose}
+          onResize={place}
         />
       </div>
     );
@@ -236,8 +250,14 @@ interface DoctorFormProps {
   /** `Uložit lékaře`, with times that make a note. */
   onSave(note: DoctorNote): void;
   onRemove(): void;
-  /** Tab past the last control, or Shift+Tab before the first: the form closes. */
-  onLeave(): void;
+  /**
+   * The focus has left the form, and so it is to close: `restoreFocus` is whether the cell is to
+   * take the focus, which it is after Tab past the last control, and is not after a move that the
+   * focus made by itself, for it is where it went.
+   */
+  onLeave(restoreFocus: boolean): void;
+  /** The form is a different size now, so it is to be put beside the cell again. */
+  onResize(): void;
 }
 
 /**
@@ -246,7 +266,7 @@ interface DoctorFormProps {
  * a note, `Odebrat lékaře`. A note must start before it ends; if the times do not make one, the
  * form says why and stores nothing. The focus goes to the first box, and Enter in a box stores.
  */
-function DoctorForm({ note, onSave, onRemove, onLeave }: DoctorFormProps) {
+function DoctorForm({ note, onSave, onRemove, onLeave, onResize }: DoctorFormProps) {
   const { doctor } = MONTH_SCREEN;
   const fromId = useId();
   const toId = useId();
@@ -259,6 +279,12 @@ function DoctorForm({ note, onSave, onRemove, onLeave }: DoctorFormProps) {
   useEffect(() => {
     first.current?.focus({ preventScroll: true });
   }, []);
+
+  // The form appears, and its message comes and goes: each changes its height, and a form that
+  // was under the cell may no longer fit there (or one that was above it may fit under it).
+  useLayoutEffect(() => {
+    onResize();
+  }, [problem, onResize]);
 
   const typed = (set: (value: string) => void) => (e: ChangeEvent<HTMLInputElement>) => {
     set(e.target.value);
@@ -274,17 +300,34 @@ function DoctorForm({ note, onSave, onRemove, onLeave }: DoctorFormProps) {
     else onSave({ from: start, to: end });
   };
 
+  // Tab past the last control closes the form and gives the focus to the cell, as Tab does in the
+  // list. The last control is a button, so the focus on it is the place to leave from. Shift+Tab
+  // is the browser's: a time box has parts (the hour, the minute), and Tab and Shift+Tab move
+  // between them with the focus staying on the box, so the focus on the first box does not mean
+  // that it is on its first part. The move out of the form closes it (`onBlur`).
   const onKeyDown = (e: ReactKeyboardEvent<HTMLFormElement>) => {
-    if (e.key !== 'Tab') return;
-    // Tab goes from control to control; from the last one it leaves, like Tab in the list does.
+    if (e.key !== 'Tab' || e.shiftKey) return;
     const controls = e.currentTarget.querySelectorAll<HTMLElement>('input, button');
-    if (document.activeElement !== controls[e.shiftKey ? 0 : controls.length - 1]) return;
+    if (document.activeElement !== controls[controls.length - 1]) return;
     e.preventDefault();
-    onLeave();
+    onLeave(true);
+  };
+
+  // The focus moving to an element outside the form closes it, and stays where it went. A move to
+  // no element, as when another window is switched to, does not: the form is there when it is back.
+  const onBlur = (e: ReactFocusEvent<HTMLFormElement>) => {
+    const goingTo = e.relatedTarget;
+    if (goingTo instanceof Node && !e.currentTarget.contains(goingTo)) onLeave(false);
   };
 
   return (
-    <form className="month-doctor-form" noValidate onSubmit={submit} onKeyDown={onKeyDown}>
+    <form
+      className="month-doctor-form"
+      noValidate
+      onSubmit={submit}
+      onKeyDown={onKeyDown}
+      onBlur={onBlur}
+    >
       <label htmlFor={fromId}>{doctor.from}</label>
       <input id={fromId} ref={first} type="time" value={from} onChange={typed(setFrom)} />
       <label htmlFor={toId}>{doctor.to}</label>

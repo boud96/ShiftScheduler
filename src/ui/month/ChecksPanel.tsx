@@ -1,6 +1,7 @@
 import { useId } from 'react';
 import type { MonthContext } from '../../domain/context';
 import { shortDate } from '../../domain/format';
+import { tier } from '../../domain/rules/evaluate';
 import type { Finding } from '../../domain/rules/types';
 import { MONTH_SCREEN } from '../text';
 
@@ -55,9 +56,9 @@ function lineOf(finding: Finding, ctx: MonthContext, names: readonly string[]): 
 }
 
 /**
- * The lines of the list for the findings of a month: those that are not quiet, the musts first,
- * then the strong wishes, then the other wishes, each group in the order of `findings`. `names`
- * are the people of `ctx`.
+ * The lines of the list for the findings of a month: those that are not quiet, in the order of the
+ * engine's tiers (`tier`): the musts, then the strong wishes, then the other wishes. Each group
+ * keeps the order of `findings`. `names` are the people of `ctx`.
  */
 export function checksOf(
   findings: readonly Finding[],
@@ -74,12 +75,8 @@ export function checksOf(
       const key = times === 0 ? base : `${base}#${times}`;
       return { key, finding, text: lineOf(finding, ctx, names) };
     });
-  const wishes = checks.filter((c) => c.finding.severity === 'wish');
-  return [
-    ...checks.filter((c) => c.finding.severity === 'must'),
-    ...wishes.filter((c) => c.finding.strong === true),
-    ...wishes.filter((c) => c.finding.strong !== true),
-  ];
+  // The sort is stable, so inside a tier the lines keep the order that `findings` has.
+  return checks.sort((a, b) => tier(a.finding) - tier(b.finding));
 }
 
 /** The marks for the grid: the cells of the musts, and those of the check with key `pickedKey`. */
