@@ -17,7 +17,7 @@ it('wish levels scale the base weights', () => {
 });
 
 it('has the score scales and one factor per wish level', () => {
-  expect([HARD, GAP, STRONG, WEEKEND_SHORT, BELOW_FPD]).toEqual([1e9, 1e7, 2e6, 1e6, 1e5]);
+  expect([HARD, GAP, STRONG, WEEKEND_SHORT, BELOW_FPD]).toEqual([1e9, 1e7, 3e6, 1e6, 1e5]);
   expect(LEVEL_MULT).toEqual([0, 0.25, 0.5, 1, 2, 4]);
 });
 
@@ -27,6 +27,8 @@ it('the tiers keep their order', () => {
   expect(GAP).toBeGreaterThan(STRONG);
   // the hours of the longest shift never buy a night of someone who does not want nights
   expect(STRONG).toBeGreaterThan(11.5 * BELOW_FPD);
+  // nor do they together with a weekend shift below the minimum, which one N12 can earn at once
+  expect(STRONG).toBeGreaterThan(WEEKEND_SHORT + 11.5 * BELOW_FPD);
   // a night of such a person never buys a weekend shift
   expect(STRONG).toBeGreaterThan(WEEKEND_SHORT);
   // and no wish, at its strongest level, buys a weekend shift

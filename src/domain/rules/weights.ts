@@ -10,11 +10,12 @@ export const HARD = 1e9;
 /** Score of one missing person on a shift (M1). */
 export const GAP = 1e7;
 /**
- * Score of one night for someone who does not want nights (S1). Above the hours of the longest
- * shift at BELOW_FPD (11.5 × 1e5), so that hours never buy such a night; below GAP, so that
- * covering a night does.
+ * Score of one night for someone who does not want nights (S1). Above all that one night can earn
+ * in the tiers below: the hours of the longest shift at BELOW_FPD (11.5 × 1e5) together with a
+ * weekend shift below the minimum (WEEKEND_SHORT), since one N12 can earn both at once. So hours
+ * and the weekend minimum never buy such a night; covering it does, since STRONG is below GAP.
  */
-export const STRONG = 2e6;
+export const STRONG = 3e6;
 /** Score of each weekend shift below the minimum (M12). */
 export const WEEKEND_SHORT = 1e6;
 /** Score of one hour below the working-time fund (M6). */
