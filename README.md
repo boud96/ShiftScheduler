@@ -1,12 +1,14 @@
 # Shift scheduler
 
-A single HTML page that plans a team's shifts one month at a time. It generates a draft that follows the rules (every shift covered on every day, rest between shifts, a limit on 12-hour shifts, monthly hours against the norm) and leans toward each person's preferences. The planner then adjusts the draft by hand. Every change is checked on the spot against the same rules the generator works with, and the result is copied into Excel.
+A single HTML page that plans a team's shifts one month at a time. It generates a draft that follows the rules (every shift covered on every day, rest between shifts and a weekly rest, a limit on 12-hour shifts and on days in a row, a minimum of weekend shifts, monthly hours against the norm) and leans toward each person's preferences. The planner then adjusts the draft by hand. Every change is checked on the spot against the same rules the generator works with, and the result is copied into Excel.
 
 The page runs in the browser, offline, from a file on disk. It needs no server, no account and no install, and it never makes a network request. The build adds a Content-Security-Policy that makes the browser refuse connections, so this is enforced and not only promised.
 
 The page is in Czech. This README quotes its labels in Czech with an English gloss in parentheses. Code, comments and docs are in English.
 
-The design is in [`docs/superpowers/specs/2026-11-04-shift-scheduler-design.md`](docs/superpowers/specs/2026-11-04-shift-scheduler-design.md) and the plan for the first phase in [`docs/superpowers/plans/2026-11-04-shift-scheduler-phase-1.md`](docs/superpowers/plans/2026-11-04-shift-scheduler-phase-1.md).
+A quarter is planned one month after another, as there is no button for the whole quarter. Generate the first month with `Vygenerovat` (Generate), check it in `Kontrola` (Checks) and adjust it by hand, then step on with `▶` and generate the next. Each run starts from the months before it, drafts included: the rest and the days in a row at the boundary, and the running counts that fairness balances between people. So the starting counts on a card of the `Tým` (Team) tab are the counts before the first planned month. A month that was generated already is not redone when an earlier one changes: generate it again. When the quarter is done, save the file (see [The data](#the-data)).
+
+The design is in [`docs/superpowers/specs/2026-11-04-shift-scheduler-design.md`](docs/superpowers/specs/2026-11-04-shift-scheduler-design.md) and the plan for the first phase in [`docs/superpowers/plans/2026-11-04-shift-scheduler-phase-1.md`](docs/superpowers/plans/2026-11-04-shift-scheduler-phase-1.md). Phase 1.1, which brought the quarterly planning and the rules that go with it, has its design in [`docs/superpowers/specs/2026-11-07-shift-scheduler-phase-1-1-design.md`](docs/superpowers/specs/2026-11-07-shift-scheduler-phase-1-1-design.md) and its plan in [`docs/superpowers/plans/2026-11-08-shift-scheduler-phase-1-1.md`](docs/superpowers/plans/2026-11-08-shift-scheduler-phase-1-1.md).
 
 ## Develop
 
@@ -29,6 +31,9 @@ The end-to-end specs are in `tests/e2e`:
 - `csp.spec.ts`: the built page carries the Content-Security-Policy, and the browser enforces it. A `fetch` from the page is blocked and nothing leaves.
 - `grid-colours.spec.ts`: in a new plan, the gaps in the coverage row are red on the grey weekend columns too, and the hours below FPD are red. Only a browser tells which of two style rules wins, so jsdom cannot do this.
 - `plan-january.spec.ts`: starts a new plan and plans January 2027 with the real generator, in its worker, from the built file. Every day must be covered, `Kontrola` (Checks) must report no broken must, no request may leave, and no policy violation may show on the page (the spec sees only the page's own violations: one inside the generator's worker is blocked all the same, but not reported to it). It takes a few seconds, since the run has a time budget of 5 s.
+- `plan-quarter.spec.ts`: plans January, February and March 2027 in turn, as `plan-january.spec.ts` plans January, with 5 s for each run. Each month starts from the drafts of the months before it, and each must end with every day covered and no broken must. It takes about 20 s.
+- `doctor-form.spec.ts`: the form of a doctor's note (`Lékař…`, Doctor…) with a real keyboard and mouse: Tab and Shift+Tab through the parts of a time box, a click on the cell of the open form, Enter, and the form staying in the window. jsdom has no parts in a time box and does not show what a browser does with a press of the mouse, so only a browser tells.
+- `limit-box.spec.ts`: a letter typed into `Max. nočních měsíčně` (Max. nights per month) does not erase the limit: a 2 stays, and an empty box stays empty. `Kontrola` shows the limit at work, in its line about nights over it. A browser reports a box that holds a letter as empty, which jsdom does not.
 
 ## Deliver a build
 
@@ -41,7 +46,7 @@ Before you hand a build out, go through [Manual checks before handing out a buil
 
 ## The data
 
-**The save file is the real data.** It is one JSON file that holds everything: the team with its names and preferences, the settings, the requests, the months and the starting counts. The default name is `plan-smen.json`. Keep it with your other work files, in a folder that is backed up.
+**The save file is the real data.** It is one JSON file that holds everything: the team with its names, preferences and limits per person, the settings, the requests, the doctor's notes, the months and the starting counts. The default name is `plan-smen.json`. Keep it with your other work files, in a folder that is backed up. Files saved by Phase 1 (version 1) still open, and a save writes version 2, which a Phase 1 build refuses (`Soubor je z novější verze aplikace.`, The file is from a newer version of the app).
 
 **Browser storage only caches it.** The page also keeps every change in the browser's storage, so that a reload loses nothing. A browser may clear that storage (a managed browser may do so each time it closes), and a new copy of the HTML file may count as a new site with an empty cache. Then the page shows its start screen, and you open the save file with `Otevřít soubor` (Open file).
 
@@ -73,10 +78,24 @@ The automated tests cannot cover other browsers, the operating system's dialogs 
 - That includes `requestPermission` after a slow file pick. Open a file and take more than 5 s in the picker, so that the click is no longer fresh when the page asks for write access. Check that the page can still write to the file, or says plainly that it cannot.
 - A file that refuses write access, or cannot be written to, is given up: move or delete the file you are saving to, or refuse the question about write access, and press `Uložit do souboru` (Save to file). The page opens the save picker in its place, and if you cancel it, the next press opens the picker at once. Answering the question very slowly may make the browser refuse the picker: the message `Soubor se nepodařilo uložit.` (The file could not be saved.) shows, and the next press works.
 
+**Doctor's form with a real keyboard, Edge and Firefox**
+
+- On a cell, choose `Lékař…` (Doctor…), type `0800`, Tab, `1200`, Enter. The cell shows `L` and its tooltip `lékař 8:00–12:00` (doctor 8:00–12:00).
+- In Firefox, Shift+Tab inside the form keeps it open.
+
 **Czech decimal comma**
 
 - In Czech Edge, Chrome and Firefox, type `10,5` into `Odpočinek mezi směnami (h)` (Rest between shifts, h) on the `Pravidla` (Rules) tab.
 - `Kontrola` should then use 10,5 h. For example, an `O` followed by an `R2` on the next day leaves 10 h of rest, so its line must end `(min. 10,5 h)`.
+- Likewise `35,5` in `Týdenní odpočinek (h)` (Weekly rest, h) is taken as 35.5: the box still shows 35,5 once it is left.
+
+**A typo in a limit box, Firefox and Edge**
+
+- On the `Tým` (Team) tab, in `Max. nočních měsíčně` (Max. nights per month) holding 2, type a letter and leave the box: the 2 stays. In an empty one it stays empty, that is, no limit. A limit of nights is a rule that the generator never breaks, so a limit that a typo erased would let it give nights without a word.
+
+**Excel paste of a note**
+
+- Copy a real Excel row that holds `L 8-12` and paste it with `Vložit z Excelu` (Paste from Excel). The preview counts it under `Rozpoznáno` (Recognised), and the cell gets the `L` marker. Excel may copy unusual spaces, and only a real Excel shows that.
 
 **`Přidat člověka`** (Add person)
 
