@@ -4,7 +4,7 @@ import { buildMonthGrid, applyRows } from './context';
 import { Code } from './codes';
 import { fpdForMonth } from './calendar';
 import { BASE_WEIGHTS, effectiveWeights } from './rules/weights';
-import type { StoredCell } from './types';
+import type { AppData, StoredCell } from './types';
 import { ctxFor, rowsOf } from '../test/rulekit';
 
 describe('buildMonthGrid', () => {
@@ -236,6 +236,118 @@ describe('the day after the month', () => {
     const without = buildMonthGrid(data, '2027-01').ctx.people.map((p) => p.fpd);
     data.cells['2027-02-01'] = { p1: { code: 'DOV' } };
     expect(buildMonthGrid(data, '2027-01').ctx.people.map((p) => p.fpd)).toEqual(without);
+  });
+});
+
+describe('the limits, claimed holidays, notes and history of each person', () => {
+  const peopleOf = (data: AppData, month = '2027-01') => buildMonthGrid(data, month).ctx.people;
+  /** The indexes at which a mask holds 1. */
+  const marked = (mask: Uint8Array) => Array.from(mask).flatMap((v, i) => (v === 1 ? [i] : []));
+  /** The [index, minutes] pairs of the days that have a note: the others hold -1. */
+  const notes = (minutes: Int16Array) =>
+    Array.from(minutes).flatMap((v, i) => (v === -1 ? [] : [[i, v]]));
+
+  it('resolves maxTwelve from the person, else the settings', () => {
+    const data = newAppData();
+    data.people[0].maxTwelve = 5;
+    data.people[1].maxTwelve = 0; // a limit of its own: no 12-hour shifts at all
+    expect(peopleOf(data).map((p) => p.maxTwelve)).toEqual([5, 0, 3, 3, 3, 3, 3, 3]);
+    data.settings.maxTwelvePerMonth = 4;
+    expect(peopleOf(data).map((p) => p.maxTwelve)).toEqual([5, 0, 4, 4, 4, 4, 4, 4]);
+  });
+
+  it('carries maxNights: the limit of the person, null for no limit', () => {
+    const data = newAppData();
+    data.people[0].maxNights = 2;
+    data.people[1].maxNights = 0; // a limit of its own: no nights at all
+    expect(peopleOf(data).slice(0, 3).map((p) => p.maxNights)).toEqual([2, 0, null]);
+  });
+
+  it('marks claimed holiday shifts', () => {
+    const data = newAppData();
+    data.cells['2027-01-01'] = {
+      p1: { code: 'R12', pinned: true }, // a pinned R12 on a holiday: claimed
+      p2: { code: 'R12' }, // not pinned
+    };
+    data.cells['2027-01-02'] = { p3: { code: 'R12', pinned: true } }; // a plain Saturday
+    const [p1, p2, p3, p4] = peopleOf(data);
+    expect(p1.claimed).toBeInstanceOf(Uint8Array);
+    expect(p1.claimed).toHaveLength(7 + 31);
+    expect(marked(p1.claimed)).toEqual([7]); // 1 January is the first day of the month
+    expect(marked(p2.claimed)).toEqual([]);
+    expect(marked(p3.claimed)).toEqual([]);
+    expect(marked(p4.claimed)).toEqual([]);
+  });
+
+  it('marks a claimed holiday shift on the tail, and on a holiday that is a weekend day', () => {
+    const data = newAppData();
+    data.cells['2026-12-25'] = { p1: { code: 'N12', pinned: true } }; // in the tail of January
+    expect(marked(peopleOf(data)[0].claimed)).toEqual([0]);
+    data.cells['2027-05-08'] = { p1: { code: 'R12', pinned: true } }; // a holiday, and a Saturday
+    expect(marked(peopleOf(data, '2027-05')[0].claimed)).toEqual([7 + 7]);
+  });
+
+  it("carries doctor's notes", () => {
+    const data = newAppData();
+    data.doctor['2027-01-05'] = { p1: { from: 480, to: 720 } }; // L 8-12
+    data.cells['2027-01-05'] = { p1: { code: 'O' } }; // a note sits beside a shift
+    const g = buildMonthGrid(data, '2027-01');
+    const [p1, p2] = g.ctx.people;
+    expect(p1.doctorFrom).toBeInstanceOf(Int16Array);
+    expect(p1.doctorTo).toBeInstanceOf(Int16Array);
+    expect(p1.doctorFrom).toHaveLength(7 + 31);
+    expect(p1.doctorTo).toHaveLength(7 + 31);
+    expect([p1.doctorFrom[7 + 4], p1.doctorTo[7 + 4]]).toEqual([480, 720]);
+    expect(notes(p1.doctorFrom)).toEqual([[11, 480]]); // every other day holds -1
+    expect(notes(p1.doctorTo)).toEqual([[11, 720]]);
+    expect(notes(p2.doctorFrom)).toEqual([]);
+    expect(notes(p2.doctorTo)).toEqual([]);
+    expect(g.rows[0][7 + 4]).toBe(Code.O); // the shift is as it was
+  });
+
+  it("keeps each person's own notes, the tail's too, and a note from midnight is a note", () => {
+    const data = newAppData();
+    data.doctor['2026-12-30'] = { p1: { from: 0, to: 60 } }; // in the tail, 00:00-01:00
+    data.doctor['2027-01-06'] = { p1: { from: 840, to: 1440 }, p2: { from: 600, to: 660 } };
+    data.doctor['2027-02-02'] = { p1: { from: 480, to: 720 } }; // after the month
+    const [p1, p2] = peopleOf(data);
+    expect(notes(p1.doctorFrom)).toEqual([[5, 0], [12, 840]]);
+    expect(notes(p1.doctorTo)).toEqual([[5, 60], [12, 1440]]);
+    expect(notes(p2.doctorFrom)).toEqual([[12, 600]]);
+    expect(notes(p2.doctorTo)).toEqual([[12, 660]]);
+  });
+
+  it('history adds starting counts and earlier months', () => {
+    const data = newAppData();
+    data.people[0].startingCounts = { twelve: 2, nights: 1, holidayTwelve: 1, festive: 3 };
+    data.cells['2027-01-01'] = { p1: { code: 'R12', pinned: true } }; // claimed: no twelve
+    data.cells['2027-01-02'] = { p1: { code: 'R12' } };
+    data.cells['2027-01-05'] = { p1: { code: 'N' }, p2: { code: 'N' } };
+    data.cells['2027-02-02'] = { p1: { code: 'N' } }; // the month that is built: no history
+    const before = structuredClone(data);
+    const [p1, p2, p3] = peopleOf(data, '2027-02');
+    expect(p1.history).toEqual({ twelve: 3, nights: 2, holidayTwelve: 2, festive: 4 });
+    expect(p2.history).toEqual({ twelve: 0, nights: 1, holidayTwelve: 0, festive: 0 });
+    expect(p3.history).toEqual({ twelve: 0, nights: 0, holidayTwelve: 0, festive: 0 });
+    expect(data).toEqual(before); // the starting counts are not added to in place
+  });
+
+  it('history is the starting counts alone when no earlier month holds a shift', () => {
+    const data = newAppData();
+    const starting = { twelve: 2, nights: 1, holidayTwelve: 1, festive: 3 };
+    data.people[0].startingCounts = { ...starting };
+    data.cells['2027-01-02'] = { p1: { code: 'R12' } }; // the month itself
+    expect(peopleOf(data)[0].history).toEqual(starting);
+  });
+
+  it('history follows the fairness window of the settings', () => {
+    const data = newAppData();
+    data.cells['2027-01-02'] = { p1: { code: 'R12' } };
+    data.cells['2027-02-06'] = { p1: { code: 'R12' } };
+    data.settings.fairnessWindowMonths = 1;
+    expect(peopleOf(data, '2027-03')[0].history.twelve).toBe(1); // February only
+    data.settings.fairnessWindowMonths = 2;
+    expect(peopleOf(data, '2027-03')[0].history.twelve).toBe(2);
   });
 });
 

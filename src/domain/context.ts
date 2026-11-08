@@ -2,6 +2,7 @@ import { TAIL_DAYS, addDays, monthDays, tailDays } from './calendar';
 import type { DayInfo } from './calendar';
 import { Code, codeFromName, isAbsence, isShift, nameOf } from './codes';
 import type { CodeInt } from './codes';
+import { addCounts, historyCounts, isClaimed } from './history';
 import { effectiveWeights } from './rules/weights';
 import type {
   AppData,
@@ -21,9 +22,30 @@ export interface EnginePerson {
   prefs: Preferences;
   /** The hours to reach: active Mon-Fri days times the daily hours, plus the month's adjustment. */
   fpd: number;
+  /**
+   * The most 12-hour shifts the person may have in the month: their own limit if they have one,
+   * else the general maximum of the settings. Claimed holiday shifts do not count toward it.
+   */
+  maxTwelve: number;
+  /** The most nights (N and N12) the person may have in the month; null means no limit. */
+  maxNights: number | null;
   /** 1 on each day of `MonthContext.days` on which the person is in the team, 0 on the others. */
   active: Uint8Array;
-  /** Fairness counts brought in from the months before. */
+  /**
+   * 1 on each day of `MonthContext.days` on which the person has a claimed holiday shift (see
+   * `isClaimed`: a pinned R12 or N12 on a public holiday), 0 on the others.
+   */
+  claimed: Uint8Array;
+  /**
+   * The start and the end of the person's doctor's appointment on each day of `MonthContext.days`,
+   * in minutes from midnight, or -1 on a day without one. The two arrays are set on the same days.
+   */
+  doctorFrom: Int16Array;
+  doctorTo: Int16Array;
+  /**
+   * Fairness counts brought in from the months before: the starting counts of the person plus the
+   * counts of the earlier months in the fairness window (see `historyCounts`).
+   */
   history: FairnessCounts;
   /**
    * The code stored for the person on day 1 of the next month, the day after the last of
@@ -61,6 +83,9 @@ interface Member {
   active: Uint8Array;
 }
 
+/** What `EnginePerson.doctorFrom` and `doctorTo` hold on a day without a doctor's appointment. */
+const NO_NOTE = -1;
+
 const contextDays = (month: MonthKey, settings: Settings): DayInfo[] => [
   ...tailDays(month, settings),
   ...monthDays(month, settings),
@@ -89,7 +114,7 @@ function membersOf(data: AppData, days: DayInfo[]): Member[] {
 
 /**
  * Builds the engine's view of a month from the stored data. The context shares `settings`, and each
- * person's `prefs` and `startingCounts`, with `data`, so it must not be edited.
+ * person's `prefs`, with `data`, so it must not be edited.
  *
  * A cell is fixed when it is a day of the previous month, holds x or an absence, is a pinned shift,
  * or lies on a day on which the person is not in the team. Whatever is stored on such a day stays
@@ -97,6 +122,10 @@ function membersOf(data: AppData, days: DayInfo[]): Member[] {
  *
  * What is stored for a person on day 1 of the next month goes to `EnginePerson.nextDay`, outside
  * the rows: the month's last day is judged against it, and no move can change it.
+ *
+ * Beside the rows, each person carries what the rules need to know of them: their limits, the days
+ * of their claimed holiday shifts, their doctor's notes, and the fairness counts of the months
+ * before (their starting counts plus the earlier months of the file, drafts included).
  */
 export function buildMonthGrid(data: AppData, month: MonthKey): MonthGrid {
   const { settings } = data;
@@ -110,9 +139,13 @@ export function buildMonthGrid(data: AppData, month: MonthKey): MonthGrid {
   for (const { person, active } of membersOf(data, days)) {
     const row = new Uint8Array(days.length);
     const locked = new Uint8Array(days.length);
+    const claimed = new Uint8Array(days.length);
+    const doctorFrom = new Int16Array(days.length).fill(NO_NOTE);
+    const doctorTo = new Int16Array(days.length).fill(NO_NOTE);
     let weekdays = 0;
     days.forEach((day, i) => {
       const cell = data.cells[day.date]?.[person.id];
+      const note = data.doctor[day.date]?.[person.id];
       const code = codeFromName(cell?.code ?? '') ?? Code.EMPTY;
       const inTeam = active[i] === 1;
       row[i] = code;
@@ -124,6 +157,11 @@ export function buildMonthGrid(data: AppData, month: MonthKey): MonthGrid {
         (isShift(code) && cell?.pinned === true)
           ? 1
           : 0;
+      claimed[i] = isClaimed(cell, day) ? 1 : 0;
+      if (note !== undefined) {
+        doctorFrom[i] = note.from;
+        doctorTo[i] = note.to;
+      }
       if (day.inMonth && inTeam && day.weekday < 5) weekdays++;
     });
     const next = activeOn(person, dayAfter) ? data.cells[dayAfter]?.[person.id] : undefined;
@@ -131,8 +169,13 @@ export function buildMonthGrid(data: AppData, month: MonthKey): MonthGrid {
       id: person.id,
       prefs: person.prefs,
       fpd: weekdays * settings.fpdHoursPerWeekday + (adjustments?.[person.id] ?? 0),
+      maxTwelve: person.maxTwelve ?? settings.maxTwelvePerMonth,
+      maxNights: person.maxNights,
       active,
-      history: person.startingCounts,
+      claimed,
+      doctorFrom,
+      doctorTo,
+      history: addCounts(person.startingCounts, historyCounts(data, month, person.id)),
       nextDay: codeFromName(next?.code ?? '') ?? Code.EMPTY,
     });
     rows.push(row);

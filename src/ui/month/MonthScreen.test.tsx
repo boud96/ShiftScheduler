@@ -951,10 +951,14 @@ describe('the coverage row', () => {
 /**
  * C has an O on 31 December and an R12 on 1 January: only 8 h of rest, so one must is broken. A
  * has one 12-hour shift more than the rest in the counts brought in, so one wish is shown.
+ *
+ * There are no festive days here. The fairness of January counts the shift of C on 31 December, so
+ * with festive days C would have two of them, more than the rest, and W7 would show a second wish.
  */
 function oneMustOneWish(): AppData {
   const data = calm();
   data.settings.wishLevels.W7 = 3;
+  data.settings.festiveDays = [];
   data.people[0].startingCounts.twelve = 2;
   put(data, '2026-12-31', 'C', 'O');
   put(data, '2027-01-01', 'C', 'R12');
