@@ -3,17 +3,20 @@ import { describe, it, expect } from 'vitest';
 import { newAppData } from '../domain/defaults';
 import { buildMonthGrid } from '../domain/context';
 import { evaluateMonth } from '../domain/rules/evaluate';
-import { Code } from '../domain/codes';
+import { Code, isShift } from '../domain/codes';
 import { syntheticTeam } from '../test/team';
 import { SearchState } from './state';
-import { leavesTooLittleRest, proposeMove } from './moves';
+import { breaksHardMust, leavesTooLittleRest, proposeMove } from './moves';
+import type { Move } from './moves';
 import { construct } from './construct';
 import { search } from './search';
 import { mulberry32 } from './rng';
 import type { MonthContext, MonthGrid } from '../domain/context';
 import { HARD } from '../domain/rules/weights';
+import type { RuleId } from '../domain/rules/types';
 import type { CodeName, PersonId, Settings } from '../domain/types';
 import { scenario } from '../test/scenarios';
+import type { ScenarioName } from '../test/scenarios';
 
 const jan = () => { const d = newAppData(); d.people = syntheticTeam(); return buildMonthGrid(d, '2027-01'); };
 
@@ -42,6 +45,10 @@ describe('generator core', () => {
     const st = new SearchState(g.ctx, g.rows, g.fixed);
     const rnd = mulberry32(17);
     construct(st, rnd);
+    // While no must that costs HARD is broken, proposeMove skips the moves that would break one,
+    // such as a night on the last day before an x: propose as if one were broken, so that the walk
+    // takes such moves too.
+    const anyMove = Object.create(st, { score: { get: () => HARD } }) as SearchState;
     const last = g.ctx.days.length - 1;
     const atTheEnd = (rows: Uint8Array[]) =>
       evaluateMonth(g.ctx, rows, true).findings.filter(
@@ -49,7 +56,7 @@ describe('generator core', () => {
       ).length;
     let seen = 0;
     for (let i = 0; i < 3000; i++) {
-      const m = proposeMove(st, rnd); if (!m) continue;
+      const m = proposeMove(anyMove, rnd); if (!m) continue;
       st.tryMove(m);
       const full = evaluateMonth(g.ctx, st.rows);
       expect(Math.abs(st.score - full.score) / Math.max(1, full.score)).toBeLessThan(1e-9);
@@ -477,5 +484,173 @@ describe('rest pre-filter', () => {
       else st.revert();
     }
     expect(skipped).toBeGreaterThan(300);
+  });
+});
+
+describe('pre-filter of the musts that cost HARD', () => {
+  const grid = (name: ScenarioName) => {
+    const { data, month } = scenario(name);
+    return buildMonthGrid(data, month);
+  };
+
+  /** The rules of the findings that cost HARD. */
+  const hardRules = (ctx: MonthContext, rows: Uint8Array[]) =>
+    evaluateMonth(ctx, rows, true)
+      .findings.filter((f) => f.severity === 'must' && f.penalty >= HARD)
+      .map((f) => f.rule);
+
+  /**
+   * Months in which moves can break the musts that cost HARD, with the musts that a walk over each
+   * sees broken among others: a night before a request (M4) where requests follow days of the
+   * month, the limits of 12-hour shifts and nights (M5, M13) where people have limits of their own.
+   */
+  const months: Array<[string, () => MonthGrid, RuleId[]]> = [
+    [
+      'January after a December of nights',
+      () => grid('jan2027'),
+      ['M1', 'M2', 'M5', 'M9', 'M10', 'M11'],
+    ],
+    ['February with a weekend off for all but H', () => grid('impossible'), ['M4']],
+    ['January before requests on 1 February', () => grid('monthEnd'), ['M4']],
+    [
+      'January with a claimed holiday and limits of their own',
+      () => {
+        const d = newAppData();
+        d.people = syntheticTeam();
+        d.cells['2027-01-01'] = { C: { code: 'R12', pinned: true } }; // a claimed holiday shift
+        for (const person of d.people) {
+          if (person.id === 'B') person.maxTwelve = 2;
+          if (person.id === 'D') person.maxNights = 4;
+          if (person.id === 'F') person.maxNights = 0;
+        }
+        return buildMonthGrid(d, '2027-01');
+      },
+      ['M5', 'M13'],
+    ],
+  ];
+
+  it.each(months)(
+    'tells exactly the moves that make the score worse by HARD / 2 or more (%s)',
+    (_, make, expected) => {
+      const g = make();
+      const st = new SearchState(g.ctx, g.rows, g.fixed);
+      const rnd = mulberry32(43);
+      construct(st, rnd);
+      expect(st.score).toBeLessThan(HARD / 2);
+      // as if a HARD must were broken: every pick is proposed, those that break one too
+      const unfiltered = Object.create(st, { score: { get: () => HARD } }) as SearchState;
+
+      const kinds = new Set<Move['kind']>();
+      const broken = new Set<RuleId>();
+      let breaking = 0;
+      let keeping = 0;
+      for (let k = 0; k < 3000; k++) {
+        const m = proposeMove(unfiltered, rnd);
+        if (!m) continue;
+        kinds.add(m.kind);
+        const verdict = breaksHardMust(st, m);
+        const delta = st.tryMove(m);
+        expect(delta >= HARD / 2, JSON.stringify(m)).toBe(verdict);
+        if (verdict) {
+          breaking++;
+          for (const rule of hardRules(g.ctx, st.rows)) broken.add(rule);
+        } else {
+          keeping++;
+        }
+        // walk on, but never into a month with a HARD must broken
+        if (!verdict && rnd() < 0.5) st.commit();
+        else st.revert();
+      }
+      expect(breaking).toBeGreaterThan(300);
+      expect(keeping).toBeGreaterThan(300);
+      expect([...kinds].sort()).toEqual(['exchange', 'set', 'shiftMove', 'swapDay', 'swapRange']);
+      expect([...broken]).toEqual(expect.arrayContaining(expected));
+    },
+  );
+
+  it('lets the search propose only moves that break no such must, while none is broken', () => {
+    const g = grid('jan2027');
+    const st = new SearchState(g.ctx, g.rows, g.fixed);
+    const rnd = mulberry32(44);
+    construct(st, rnd);
+    for (let k = 0; k < 2000; k++) {
+      const m = proposeMove(st, rnd);
+      if (!m) continue;
+      expect(breaksHardMust(st, m), JSON.stringify(m)).toBe(false);
+      const delta = st.tryMove(m);
+      expect(delta).toBeLessThan(HARD / 2);
+      if (rnd() < 0.5) st.commit();
+      else st.revert();
+    }
+    expect(st.score).toBeLessThan(HARD / 2);
+  });
+});
+
+describe('exchange', () => {
+  /** How many shifts `row` holds on the days of the month. */
+  const shifts = (g: MonthGrid, row: Uint8Array) => {
+    let count = 0;
+    for (let i = g.ctx.first; i < row.length; i++) if (isShift(row[i])) count++;
+    return count;
+  };
+
+  it('hands back as many shifts as it hands over, on two ranges apart, and keeps each day', () => {
+    const g = jan();
+    const st = new SearchState(g.ctx, g.rows, g.fixed);
+    const rnd = mulberry32(5);
+    construct(st, rnd);
+    let seen = 0;
+    const lengths = new Set<number>();
+    for (let k = 0; k < 20000 && seen < 300; k++) {
+      const m = proposeMove(st, rnd);
+      if (!m || m.kind !== 'exchange') continue;
+      seen++;
+      lengths.add(m.len);
+      // at least one day between the ranges
+      expect(m.e + m.len < m.d || m.e > m.d + m.len, JSON.stringify(m)).toBe(true);
+      const before = st.snapshot();
+      st.tryMove(m);
+      for (const p of [m.p, m.q]) expect(shifts(g, st.rows[p])).toBe(shifts(g, before[p]));
+      for (let i = g.ctx.first; i < g.ctx.days.length; i++) {
+        const day = (rows: Uint8Array[]) => rows.map((row) => row[i]).sort();
+        expect(day(st.rows)).toEqual(day(before));
+        const inside = (i >= m.d && i < m.d + m.len) || (i >= m.e && i < m.e + m.len);
+        st.rows.forEach((row, p) => {
+          if (!inside || (p !== m.p && p !== m.q)) expect(row[i]).toBe(before[p][i]);
+        });
+      }
+      if (rnd() < 0.5) st.commit();
+      else st.revert();
+    }
+    expect(seen).toBe(300);
+    expect([...lengths].sort()).toEqual([1, 2]);
+  });
+
+  it('refuses an exchange whose ranges overlap or touch, or that changes a fixed cell', () => {
+    const d = newAppData();
+    d.people = syntheticTeam();
+    d.cells['2027-01-20'] = { A: { code: 'DOV' } };
+    const g = buildMonthGrid(d, '2027-01');
+    const st = new SearchState(g.ctx, g.rows, g.fixed);
+    construct(st, mulberry32(1));
+    const rows = st.snapshot();
+    const score = st.score;
+
+    // Wed 20 Jan is day 7 + 19
+    const tries: Move[] = [
+      { kind: 'exchange', p: 1, q: 2, d: 7 + 3, e: 7 + 4, len: 1 }, // the ranges touch
+      { kind: 'exchange', p: 1, q: 2, d: 7 + 3, e: 7 + 4, len: 2 }, // they overlap
+      { kind: 'exchange', p: 1, q: 2, d: 7 + 3, e: 7 + 3, len: 1 }, // the same range
+      { kind: 'exchange', p: 0, q: 1, d: 7 + 3, e: 7 + 19, len: 1 }, // A's DOV
+      { kind: 'exchange', p: 1, q: 2, d: 6, e: 7 + 10, len: 1 }, // a day of December
+    ];
+    for (const m of tries) expect(() => st.tryMove(m), JSON.stringify(m)).toThrow();
+    expect(st.rows).toEqual(rows);
+    expect(st.score).toBe(score);
+
+    // no refused move is left in hand: the next one is tried as usual
+    st.tryMove({ kind: 'exchange', p: 1, q: 2, d: 7 + 3, e: 7 + 5, len: 1 });
+    st.revert();
+    expect(st.rows).toEqual(rows);
   });
 });

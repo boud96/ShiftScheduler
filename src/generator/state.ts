@@ -18,7 +18,8 @@ import type { Move } from './moves';
  * it equals a full evaluation of the rows however many moves have been made.
  *
  * A move is checked before anything is written: one that would change a fixed cell or a day of
- * the previous month throws, and the month stays as it was.
+ * the previous month throws, and so does an exchange whose two ranges overlap or touch. The month
+ * then stays as it was.
  */
 export class SearchState {
   readonly ctx: MonthContext;
@@ -155,6 +156,23 @@ export class SearchState {
         this.touchDay(m.to);
         break;
       }
+      case 'exchange':
+        if (m.e + m.len >= m.d && m.e <= m.d + m.len) {
+          throw new Error('SearchState: the ranges of an exchange may not overlap or touch');
+        }
+        for (let i = 0; i < m.len; i++) {
+          this.check(m.p, m.d + i);
+          this.check(m.q, m.d + i);
+          this.check(m.p, m.e + i);
+          this.check(m.q, m.e + i);
+        }
+        for (let i = 0; i < m.len; i++) {
+          this.swap(m.p, m.q, m.d + i);
+          this.swap(m.p, m.q, m.e + i);
+        }
+        this.touchPerson(m.p);
+        this.touchPerson(m.q);
+        break;
     }
 
     this.pending = true;

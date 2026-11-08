@@ -70,8 +70,8 @@ const RESTARTS = 6;
 const PROGRESS_EVERY = 2000;
 /**
  * The temperature at the start of each segment, and the one it has cooled down to by its end.
- * `proposeMove` skips moves that leave too little rest because exp(-HARD / 2 / T) is 0 at these
- * temperatures: a much hotter start would have to be checked against that.
+ * `proposeMove` skips moves that break a must that costs HARD because exp(-HARD / 2 / T) is 0 at
+ * these temperatures: a much hotter start would have to be checked against that.
  */
 const START_TEMPERATURE = 60;
 const END_TEMPERATURE = 0.3;
