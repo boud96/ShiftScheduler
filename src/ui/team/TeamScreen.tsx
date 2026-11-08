@@ -35,6 +35,7 @@ export function TeamScreen() {
             person={person}
             first={i === 0}
             last={i === data.people.length - 1}
+            generalMaxTwelve={data.settings.maxTwelvePerMonth}
             autoFocus={person.id === added}
           />
         ))}

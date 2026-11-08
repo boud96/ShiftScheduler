@@ -31,3 +31,9 @@ it('abbreviates the weekdays in Czech, Monday first like DayInfo.weekday', () =>
 it('names the doctor wish W10 for the Rules screen', () => {
   expect(WISH_LABELS.W10).toBe('Směna mimo návštěvu lékaře');
 });
+
+it('names W3 after what it charges, not after the must M10', () => {
+  // Since Phase 1.1 two days off after six working days is the must M10. The wish W3 charges a run
+  // over five days, a lone day off, and one day off after five or more.
+  expect(WISH_LABELS.W3).toBe('Nejvýš 5 dní v kuse, pak 2 dny volna');
+});

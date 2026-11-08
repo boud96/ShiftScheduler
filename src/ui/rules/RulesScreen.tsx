@@ -5,24 +5,11 @@ import { ChoiceSelect, NumberField } from '../form';
 import { useApp } from '../store';
 import { LEVEL_CHOICES, RULES_SCREEN, WISH_LABELS } from '../text';
 
-/** The wishes in the order of the screen. */
-const WISH_IDS: readonly WishId[] = [
-  'W1',
-  'W2',
-  'W3',
-  'W4a',
-  'W4b',
-  'W4c',
-  'W4d',
-  'W5a',
-  'W5b',
-  'W5c',
-  'W5d',
-  'W6',
-  'W7',
-  'W8',
-  'W9',
-];
+/**
+ * The wishes in the order of the screen: the order of `WISH_LABELS`. The list is made from the
+ * labels, so that a wish which has a label cannot be left off the screen.
+ */
+const WISH_IDS = Object.keys(WISH_LABELS) as readonly WishId[];
 
 /** A group of controls, named for the page's readers by its heading. */
 function Section({ title, children }: { title: string; children: ReactNode }) {
@@ -36,10 +23,10 @@ function Section({ title, children }: { title: string; children: ReactNode }) {
 }
 
 /**
- * The rules that the team lead can change in Phase 1: the numbers of the musts and of the
- * generator, and how much each wish matters. The checks of the Měsíc tab and the generator read
- * what is chosen here. Nothing is checked across the fields, so the target of 12-hour shifts may
- * be above the maximum; the checks and the generator cope with that.
+ * The rules that the team lead can change: the numbers of the musts and of the generator, and how
+ * much each wish matters. The checks of the Měsíc tab and the generator read what is chosen here.
+ * Nothing is checked across the fields, so the target of 12-hour shifts may be above the maximum;
+ * the checks and the generator cope with that.
  */
 export function RulesScreen() {
   const { data, dispatch } = useApp();
@@ -62,11 +49,33 @@ export function RulesScreen() {
           onChange={(minRestHours) => update({ minRestHours })}
         />
         <NumberField
+          label={RULES_SCREEN.weeklyRest}
+          min={24}
+          max={48}
+          step={0.5}
+          value={settings.weeklyRestHours}
+          onChange={(weeklyRestHours) => update({ weeklyRestHours })}
+        />
+        <NumberField
+          label={RULES_SCREEN.maxDaysInRow}
+          min={4}
+          max={7}
+          value={settings.maxDaysInRow}
+          onChange={(maxDaysInRow) => update({ maxDaysInRow })}
+        />
+        <NumberField
           label={RULES_SCREEN.maxTwelve}
           min={1}
           max={10}
           value={settings.maxTwelvePerMonth}
           onChange={(maxTwelvePerMonth) => update({ maxTwelvePerMonth })}
+        />
+        <NumberField
+          label={RULES_SCREEN.minWeekendShifts}
+          min={0}
+          max={5}
+          value={settings.minWeekendShifts}
+          onChange={(minWeekendShifts) => update({ minWeekendShifts })}
         />
         <NumberField
           label={RULES_SCREEN.twelveTarget}

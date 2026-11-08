@@ -76,6 +76,75 @@ export function ChoiceSelect<T extends string | number | null>(props: {
   );
 }
 
+/** The text that a number box holds for a stored number: empty while there is none. */
+const textOf = (value: number | null): string => (value === null ? '' : String(value));
+
+interface NumberBoxProps {
+  label: string;
+  /** The stored number; null where there is none, in a box that may be empty. */
+  value: number | null;
+  min: number;
+  /** Undefined: no limit, but the number has to be one that stays exact. */
+  max: number | undefined;
+  step: number;
+  placeholder?: string;
+  /** Stores a number that is good and is not the one stored. */
+  onNumber: (value: number) => void;
+  /** Stores an empty box. Without it an empty box stores nothing, and the stored number stays. */
+  onEmpty?: () => void;
+}
+
+/**
+ * The box of the two number fields. What is typed stays in the box as it is, even while it is no
+ * number yet (the box is empty, a minus sign): only a number that is good is stored, and when the
+ * box is left it shows the number that is stored. A number is good when it is within `min` and
+ * `max` and on the step: with a step of 0.5 a half is good, with a step of 1 only a whole number
+ * is.
+ */
+function NumberBox(props: NumberBoxProps) {
+  const { label, value, min, max, step, placeholder, onNumber, onEmpty } = props;
+  const limit = max ?? Number.MAX_SAFE_INTEGER; // beyond it a number cannot be exact
+  const [text, setText] = useState(textOf(value));
+  const [shown, setShown] = useState(value);
+  if (value !== shown) {
+    // The number changed other than by typing here, e.g. another plan was opened.
+    setShown(value);
+    setText(textOf(value));
+  }
+  return (
+    <Field label={label}>
+      {(id) => (
+        <input
+          id={id}
+          type="number"
+          min={min}
+          max={max}
+          step={step}
+          placeholder={placeholder}
+          value={text}
+          onChange={(e) => {
+            setText(e.target.value);
+            if (e.target.value === '') {
+              // A browser gives '' for a box that holds a minus sign or a letter, and says so in
+              // `validity.badInput`. That box is not empty, so it stores nothing.
+              if (onEmpty !== undefined && value !== null && !e.target.validity.badInput) onEmpty();
+              return;
+            }
+            const typed = storableNumber(e.target.value, min, limit, step);
+            if (typed !== null && typed !== value) onNumber(typed);
+          }}
+          onBlur={(e) => {
+            setText(textOf(value));
+            // A box that holds a letter has '' for its text. Where the text is '' already (a limit
+            // that is not set) nothing is drawn again, and the letter would stay: the box is told.
+            if (e.target.validity.badInput) e.target.value = textOf(value);
+          }}
+        />
+      )}
+    </Field>
+  );
+}
+
 interface NumberFieldProps {
   label: string;
   value: number;
@@ -93,40 +162,47 @@ interface NumberFieldProps {
 }
 
 /**
- * A number in a range, by default a whole number of at least 0. What is typed stays in the box as
- * it is, even while it is no number yet (the box is empty, a minus sign): only a number that is
- * good is stored, and when the box is left it shows the number that is stored. A number is good
- * when it is within `min` and `max` and on the step: with a step of 0.5 a half is good, with the
- * default step only a whole number is.
+ * A number in a range, by default a whole number of at least 0. An empty box stores nothing: the
+ * stored number stays, and the box shows it again when it is left.
  */
 export function NumberField(props: NumberFieldProps) {
   const { label, value, onChange, min = 0, max, step = 1 } = props;
-  const limit = max ?? Number.MAX_SAFE_INTEGER; // beyond it a number cannot be exact
-  const [text, setText] = useState(String(value));
-  const [shown, setShown] = useState(value);
-  if (value !== shown) {
-    // The number changed other than by typing here, e.g. another plan was opened.
-    setShown(value);
-    setText(String(value));
-  }
   return (
-    <Field label={label}>
-      {(id) => (
-        <input
-          id={id}
-          type="number"
-          min={min}
-          max={max}
-          step={step}
-          value={text}
-          onChange={(e) => {
-            setText(e.target.value);
-            const typed = storableNumber(e.target.value, min, limit, step);
-            if (typed !== null && typed !== value) onChange(typed);
-          }}
-          onBlur={() => setText(String(value))}
-        />
-      )}
-    </Field>
+    <NumberBox label={label} value={value} min={min} max={max} step={step} onNumber={onChange} />
+  );
+}
+
+interface OptionalNumberFieldProps {
+  label: string;
+  /** The stored number; null where there is none, and the box is empty. */
+  value: number | null;
+  /** The least whole number the box takes, 0 or more: the box takes no minus sign. */
+  min: number;
+  /** The most whole number it takes. */
+  max: number;
+  /** In the empty box, to say what it stands for: "no limit", or the general value. */
+  placeholder: string;
+  onChange: (value: number | null) => void;
+}
+
+/**
+ * A whole number in a range that may be left out, such as the limit of a person. It follows the
+ * rules of `NumberField` except for the empty box, which stores null. 0 is a number like another,
+ * not an empty box. A box that holds something that is no number (a minus sign, a letter) is not
+ * empty either, and stores nothing.
+ */
+export function OptionalNumberField(props: OptionalNumberFieldProps) {
+  const { label, value, min, max, placeholder, onChange } = props;
+  return (
+    <NumberBox
+      label={label}
+      value={value}
+      min={min}
+      max={max}
+      step={1}
+      placeholder={placeholder}
+      onNumber={onChange}
+      onEmpty={() => onChange(null)}
+    />
   );
 }

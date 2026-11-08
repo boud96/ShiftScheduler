@@ -6,7 +6,7 @@ import type {
   Rating,
   WeekdayShift,
 } from '../../domain/types';
-import { ChoiceSelect, Field, NumberField } from '../form';
+import { ChoiceSelect, Field, NumberField, OptionalNumberField } from '../form';
 import { useApp } from '../store';
 import {
   AFTER_WEEKEND_CHOICES,
@@ -33,6 +33,12 @@ const COUNT_KEYS: readonly (keyof FairnessCounts)[] = [
   'festive',
 ];
 
+/** The most that a limit of 12-hour shifts a month takes: as many as the general maximum may be. */
+const MAX_TWELVE_LIMIT = 10;
+
+/** The most that a limit of nights a month takes: a night on every day of the longest month. */
+const MAX_NIGHTS_LIMIT = 31;
+
 const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
 
 /**
@@ -51,12 +57,23 @@ interface PersonCardProps {
   first: boolean;
   /** Whether the person is last in the team, and so cannot move down. */
   last: boolean;
+  /** The general maximum of 12-hour shifts a month, which a person without a limit has. */
+  generalMaxTwelve: number;
   /** Puts the cursor in the name when the card appears: for the person who was just added. */
   autoFocus?: boolean;
 }
 
-/** The card of one person: who they are, when they are in the team, and the survey's answers. */
-export function PersonCard({ person, first, last, autoFocus = false }: PersonCardProps) {
+/**
+ * The card of one person: who they are, when they are in the team, the survey's answers, and the
+ * numbers: allowances, limits and the counts they start with.
+ */
+export function PersonCard({
+  person,
+  first,
+  last,
+  generalMaxTwelve,
+  autoFocus = false,
+}: PersonCardProps) {
   const { dispatch } = useApp();
   const { prefs } = person;
 
@@ -216,6 +233,25 @@ export function PersonCard({ person, first, last, autoFocus = false }: PersonCar
             onChange={(days) => update({ allowance: { ...person.allowance, [key]: days } })}
           />
         ))}
+      </div>
+
+      <div className="form-field-grid">
+        <OptionalNumberField
+          label={TEAM_SCREEN.maxTwelve}
+          min={0}
+          max={MAX_TWELVE_LIMIT}
+          placeholder={TEAM_SCREEN.maxTwelveGeneral(generalMaxTwelve)}
+          value={person.maxTwelve}
+          onChange={(maxTwelve) => update({ maxTwelve })}
+        />
+        <OptionalNumberField
+          label={TEAM_SCREEN.maxNights}
+          min={0}
+          max={MAX_NIGHTS_LIMIT}
+          placeholder={TEAM_SCREEN.maxNightsNone}
+          value={person.maxNights}
+          onChange={(maxNights) => update({ maxNights })}
+        />
       </div>
 
       <fieldset className="form-group">

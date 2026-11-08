@@ -21,6 +21,7 @@ import { App } from '../App';
 import { MonthScreen } from '../month/MonthScreen';
 import { reduce } from '../reducer';
 import { AppProvider, useApp } from '../store';
+import { WISH_LABELS } from '../text';
 import { RulesScreen } from './RulesScreen';
 
 // The tests look at the actions that reach the reducer, so it calls through to the real one and
@@ -76,10 +77,13 @@ function renderRules(data: AppData | null = newAppData()) {
   );
 }
 
-// The numbers of the screen, as the brief gives them. `stored` is what a new plan holds, `valid`
-// numbers inside the range that differ from it, and `invalid` ones the box must not store. `1e1`
-// is ten to a browser, so in range for each box, but it is not a plain number. A number a hair off
-// the step, such as 20.0000000001, is no number on the step.
+// The numbers of the screen, in its order, as the briefs give them: Phase 1 the rest between
+// shifts, the 12-hour maximum and target, and the time budget; Phase 1.1 the weekly rest, the days
+// in a row and the weekend minimum. `stored` is what a new plan holds, `valid` numbers inside the
+// range that differ from it, and `invalid` ones the box must not store. `1e1` is ten to a browser,
+// so in range for some boxes, but it is not a plain number; the boxes whose range lies elsewhere
+// have a number of their own in that form (`5e0`, `3e0`, `4e1`). A number a hair off the step, such
+// as 20.0000000001, is no number on the step.
 const NUMBERS = [
   {
     label: 'Odpočinek mezi směnami (h)',
@@ -95,6 +99,29 @@ const NUMBERS = [
     ],
   },
   {
+    label: 'Týdenní odpočinek (h)',
+    key: 'weeklyRestHours',
+    min: 24,
+    max: 48,
+    step: 0.5,
+    stored: 35,
+    valid: ['24', '24.5', '35.5', '48'],
+    invalid: [
+      '23.5', '23', '48.5', '49', '100', '30.25', '30.3', '-30', '4e1',
+      '35.0000000001', '34.9999999999', '36.4999999999', '36.5000000001', // a hair off the step
+    ],
+  },
+  {
+    label: 'Max. dní v kuse',
+    key: 'maxDaysInRow',
+    min: 4,
+    max: 7,
+    step: 1,
+    stored: 6,
+    valid: ['4', '5', '7'],
+    invalid: ['3', '8', '5.5', '-1', '5e0', '6.0000000001', '5.9999999999'],
+  },
+  {
     label: 'Max. 12h směn za měsíc',
     key: 'maxTwelvePerMonth',
     min: 1,
@@ -103,6 +130,16 @@ const NUMBERS = [
     stored: 3,
     valid: ['1', '5', '10'],
     invalid: ['0', '11', '2.5', '-1', '1e1', '3.0000000001', '2.9999999999'],
+  },
+  {
+    label: 'Min. víkendových směn měsíčně',
+    key: 'minWeekendShifts',
+    min: 0,
+    max: 5,
+    step: 1,
+    stored: 2,
+    valid: ['0', '3', '5'],
+    invalid: ['6', '2.5', '-1', '3e0', '2.0000000001', '1.9999999999'],
   },
   {
     label: 'Cíl 12h směn za měsíc',
@@ -135,11 +172,14 @@ const NUMBERS = [
   invalid: readonly string[];
 }>;
 
-/** The wishes in the order of the screen, with their labels: the plan's, W5a's per ruling R3. */
+/**
+ * The wishes in the order of the screen, with their labels: the plan's, W5a's per ruling R3, and
+ * W3's since Phase 1.1 (two days off after six is the must M10 now; W3 is about runs over five).
+ */
 const WISHES: ReadonlyArray<readonly [WishId, string]> = [
   ['W1', 'Co nejméně přesčasů'],
   ['W2', 'Stejná směna 4–5 dní v řadě'],
-  ['W3', 'Po 5–6 dnech 2 dny volna'],
+  ['W3', 'Nejvýš 5 dní v kuse, pak 2 dny volna'],
   ['W4a', 'Noční v delších blocích'],
   ['W4b', 'Před nočními volno (a předtím R2, O20 nebo O)'],
   ['W4c', 'Po nočních 2 dny volna'],
@@ -152,6 +192,7 @@ const WISHES: ReadonlyArray<readonly [WishId, string]> = [
   ['W7', 'Férovost napříč měsíci'],
   ['W8', 'Neoblíbené směny rovnoměrně'],
   ['W9', 'Vyrovnané dny (R2)'],
+  ['W10', 'Směna mimo návštěvu lékaře'],
 ];
 
 /** The levels from 0 to 5, as the options show them. */
@@ -217,7 +258,7 @@ describe('the screen', () => {
     expect(screen.getAllByRole('region')).toHaveLength(2);
   });
 
-  it('holds the four numbers, in the order of the brief, in Nastavení', () => {
+  it('holds the seven numbers, in the order of the screen, in Nastavení', () => {
     renderRules();
     const section = within(screen.getByRole('region', { name: 'Nastavení' }));
     const boxes = section.getAllByRole('spinbutton');
@@ -227,13 +268,14 @@ describe('the screen', () => {
     expect(section.queryByRole('combobox')).toBeNull();
   });
 
-  it('holds one select for each wish, from W1 to W9, in Důležitost přání', () => {
+  it('holds one select for each wish, from W1 to W10, in Důležitost přání', () => {
     renderRules();
     const section = within(screen.getByRole('region', { name: 'Důležitost přání' }));
     const boxes = section.getAllByRole('combobox');
-    expect(boxes.map((box) => (box as HTMLSelectElement).labels?.[0]?.textContent)).toEqual(
-      WISHES.map(([, label]) => label),
-    );
+    const shown = boxes.map((box) => (box as HTMLSelectElement).labels?.[0]?.textContent);
+    expect(shown).toEqual(WISHES.map(([, label]) => label));
+    // The list is the one of the labels, so that a wish with a label cannot be left off the screen.
+    expect(shown).toEqual(Object.values(WISH_LABELS));
     expect(section.queryByRole('spinbutton')).toBeNull();
   });
 
@@ -249,7 +291,10 @@ describe('the screen', () => {
     const data = newAppData();
     Object.assign(data.settings, {
       minRestHours: 10.5,
+      weeklyRestHours: 36.5,
+      maxDaysInRow: 5,
       maxTwelvePerMonth: 4,
+      minWeekendShifts: 3,
       twelveTarget: 1,
       generatorTimeBudgetSec: 45,
     });
@@ -258,7 +303,10 @@ describe('the screen', () => {
     });
     renderRules(data);
     expect(number('Odpočinek mezi směnami (h)')).toHaveValue(10.5);
+    expect(number('Týdenní odpočinek (h)')).toHaveValue(36.5);
+    expect(number('Max. dní v kuse')).toHaveValue(5);
     expect(number('Max. 12h směn za měsíc')).toHaveValue(4);
+    expect(number('Min. víkendových směn měsíčně')).toHaveValue(3);
     expect(number('Cíl 12h směn za měsíc')).toHaveValue(1);
     expect(number('Čas na generování (s)')).toHaveValue(45);
     WISHES.forEach(([, label], i) => {
@@ -269,7 +317,7 @@ describe('the screen', () => {
   it('shows the defaults of a new plan', () => {
     renderRules();
     expect(NUMBERS.map((n) => (number(n.label) as HTMLInputElement).valueAsNumber)).toEqual([
-      12, 3, 2, 20,
+      12, 35, 6, 3, 2, 2, 20,
     ]);
     for (const [, label] of WISHES) expect(wish(label), label).toHaveDisplayValue('3 – běžně');
   });
@@ -280,19 +328,27 @@ describe('the screen', () => {
     const other = newAppData();
     Object.assign(other.settings, {
       minRestHours: 9,
+      weeklyRestHours: 30,
+      maxDaysInRow: 7,
       maxTwelvePerMonth: 4,
+      minWeekendShifts: 0,
       twelveTarget: 1,
       generatorTimeBudgetSec: 60,
     });
     other.settings.wishLevels.W6 = 5;
+    other.settings.wishLevels.W10 = 0;
     act(() => {
       app.dispatch({ type: 'load', data: other });
     });
     expect(number('Odpočinek mezi směnami (h)')).toHaveValue(9);
+    expect(number('Týdenní odpočinek (h)')).toHaveValue(30);
+    expect(number('Max. dní v kuse')).toHaveValue(7);
     expect(number('Max. 12h směn za měsíc')).toHaveValue(4);
+    expect(number('Min. víkendových směn měsíčně')).toHaveValue(0);
     expect(number('Cíl 12h směn za měsíc')).toHaveValue(1);
     expect(number('Čas na generování (s)')).toHaveValue(60);
     expect(wish('Oblíbené směny')).toHaveDisplayValue('5 – hodně');
+    expect(wish('Směna mimo návštěvu lékaře')).toHaveDisplayValue('0 – vypnuto');
     expect(wish('Co nejméně přesčasů')).toHaveDisplayValue('3 – běžně');
   });
 
@@ -415,7 +471,7 @@ describe('what the screen dispatches', () => {
     ]);
   });
 
-  it('stores a wish with the levels of all 15 wishes, the one that changed among them', async () => {
+  it('stores a wish with the levels of all 16 wishes, the one that changed among them', async () => {
     renderRules();
     await userEvent.selectOptions(wish('Oblíbené směny'), '0 – vypnuto');
     // The patch replaces the levels as they are, so it holds every one of them.
@@ -457,6 +513,20 @@ describe('a wish', () => {
     expect(settings().wishLevels).toEqual({ ...before.wishLevels, [id]: 5 });
     expect({ ...settings(), wishLevels: null }).toEqual({ ...before, wishLevels: null });
     expect(wish(label)).toHaveDisplayValue('5 – hodně');
+  });
+
+  it('stores the level of W10, the doctor wish, with the levels of all the wishes', async () => {
+    renderRules();
+    await userEvent.selectOptions(wish('Směna mimo návštěvu lékaře'), '5 – hodně');
+    expect(settings().wishLevels.W10).toBe(5);
+    expect(dispatched()).toEqual([
+      {
+        type: 'updateSettings',
+        patch: { wishLevels: { ...newAppData().settings.wishLevels, W10: 5 } },
+      },
+    ]);
+    await userEvent.selectOptions(wish('Směna mimo návštěvu lékaře'), '0 – vypnuto');
+    expect(settings().wishLevels.W10).toBe(0);
   });
 
   it('is stored as the number of the level, for each of the six', async () => {
@@ -514,8 +584,8 @@ describe('the Pravidla tab', () => {
     const panel = within(screen.getByRole('tabpanel', { name: 'Pravidla' }));
     expect(panel.getByRole('region', { name: 'Nastavení' })).toBeVisible();
     expect(panel.getByRole('region', { name: 'Důležitost přání' })).toBeVisible();
-    expect(panel.getAllByRole('spinbutton')).toHaveLength(4);
-    expect(panel.getAllByRole('combobox')).toHaveLength(15);
+    expect(panel.getAllByRole('spinbutton')).toHaveLength(7);
+    expect(panel.getAllByRole('combobox')).toHaveLength(16);
     expect(panel.queryByText('Připravuje se…')).toBeNull();
   });
 

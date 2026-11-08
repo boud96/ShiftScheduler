@@ -5,11 +5,12 @@ import { StrictMode } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { MockInstance } from 'vitest';
 import { newAppData } from '../../domain/defaults';
-import type { AppData } from '../../domain/types';
+import type { AppData, CodeName, ISODate, PersonId } from '../../domain/types';
 import { memoryStorage } from '../../storage/adapter';
 import { syntheticTeam } from '../../test/team';
 import { inProcessRunner } from '../../worker/runner';
 import { App } from '../App';
+import { MonthScreen } from '../month/MonthScreen';
 import { AppProvider, useApp } from '../store';
 import { TeamScreen } from './TeamScreen';
 
@@ -58,6 +59,11 @@ const surveyed = (count = 8): AppData => ({
   people: syntheticTeam().slice(0, count),
 });
 
+/** Stores `code` for `person` on `date`. */
+function put(data: AppData, date: ISODate, person: PersonId, code: CodeName) {
+  (data.cells[date] ??= {})[person] = { code };
+}
+
 /** The control with this label on the card with this index (the first by default). */
 const field = (label: string, card = 0) => screen.getAllByLabelText(label)[card];
 // R1, R2, O and O20 label a select and a checkbox on each card: the kind of box tells them apart.
@@ -75,6 +81,11 @@ const optionsOf = (box: HTMLSelectElement) => Array.from(box.options, (option) =
 async function enter(box: HTMLElement, text: string) {
   await userEvent.clear(box);
   await userEvent.type(box, text);
+}
+
+/** Puts a whole text into a box at once, as a paste does: no number on the way is stored. */
+function paste(box: HTMLElement, text: string) {
+  fireEvent.change(box, { target: { value: text } });
 }
 
 // The survey's wording, as the spec has it (§6.3) and the brief gives it.
@@ -95,6 +106,9 @@ const AFTER_WEEKEND = {
   any: 'Je mi to jedno',
 };
 const AFTER_NIGHTS = 'Po posledním nočním (po 1 dni volna) může přijít';
+const STARTING_COUNTS = 'Počáteční počty (před prvním naplánovaným měsícem)';
+const MAX_TWELVE = 'Max. 12h směn měsíčně';
+const MAX_NIGHTS = 'Max. nočních měsíčně';
 
 // --- The brief's tests -----------------------------------------------------------------------
 
@@ -160,6 +174,8 @@ describe('a card', () => {
     const numbers = [
       'Dovolená / rok',
       'MyDay / rok',
+      'Max. 12h směn měsíčně',
+      'Max. nočních měsíčně',
       '12h směny',
       'Noční směny',
       'Svátky',
@@ -171,7 +187,7 @@ describe('a card', () => {
     for (const name of ['Posunout nahoru', 'Posunout dolů', 'Odebrat']) {
       expect(card.getByRole('button', { name })).toBeInTheDocument();
     }
-    const counts = card.getByRole('group', { name: 'Výchozí počty' });
+    const counts = card.getByRole('group', { name: STARTING_COUNTS });
     expect(within(counts).getAllByRole('spinbutton')).toHaveLength(4);
   });
 
@@ -544,6 +560,186 @@ describe('the numbers', () => {
   });
 });
 
+// --- The limits and the starting counts -------------------------------------------------------
+
+/** January 2027 beside the cards: Kontrola lists what the limits of a card break. */
+function renderBeside(data: AppData) {
+  return render(
+    <AppProvider storage={memoryStorage(data)} runner={inProcessRunner}>
+      <MonthScreen initialMonth="2027-01" />
+      <TeamScreen />
+      <Probe />
+    </AppProvider>,
+  );
+}
+
+const kontrola = () => within(screen.getByRole('region', { name: 'Kontrola' }));
+
+describe('the limits and the starting counts, Phase 1.1', () => {
+  it('clearing the 12-hour limit goes back to the general value', async () => {
+    // D works four 12-hour shifts, on the first two weekends of January.
+    const data = surveyed(4);
+    for (const date of ['2027-01-02', '2027-01-03', '2027-01-09', '2027-01-10']) {
+      put(data, date, 'D', 'R12');
+    }
+    renderBeside(data);
+    const broken = 'Operátor D · 2. 1.: 4 dvanáctihodinové směny (max. 3)';
+    expect(kontrola().getByText(broken)).toBeInTheDocument(); // the general maximum, 3
+
+    await enter(field(MAX_TWELVE, 3), '4');
+    expect(people()[3].maxTwelve).toBe(4);
+    expect(kontrola().queryByText(/dvanáctihodinové směny \(max\./)).toBeNull(); // D's own limit
+
+    await userEvent.clear(field(MAX_TWELVE, 3));
+    expect(people()[3].maxTwelve).toBeNull(); // not 0, and not the 4 that was there
+    expect(kontrola().getByText(broken)).toBeInTheDocument(); // the general maximum again
+
+    // It follows the general maximum from now on, and does not keep a copy of it.
+    act(() => {
+      app.dispatch({ type: 'updateSettings', patch: { maxTwelvePerMonth: 4 } });
+    });
+    expect(kontrola().queryByText(/dvanáctihodinové směny \(max\./)).toBeNull();
+    expect(field(MAX_TWELVE, 3)).toHaveAttribute('placeholder', 'obecně 4');
+  });
+
+  it('max nights 0 is stored as 0', async () => {
+    const data = surveyed(4);
+    put(data, '2027-01-05', 'D', 'N'); // D works one night
+    renderBeside(data);
+    expect(kontrola().queryByText(/noční \(max\./)).toBeNull(); // no limit, so none is broken
+
+    await enter(field(MAX_NIGHTS, 3), '0');
+    expect(Object.is(people()[3].maxNights, 0)).toBe(true); // 0, and not null for no limit
+    expect(field(MAX_NIGHTS, 3)).toHaveValue(0);
+    expect(kontrola().getByText('Operátor D · 5. 1.: 1 noční (max. 0)')).toBeInTheDocument();
+
+    await userEvent.clear(field(MAX_NIGHTS, 3));
+    expect(people()[3].maxNights).toBeNull();
+    expect(kontrola().queryByText(/noční \(max\./)).toBeNull();
+  });
+
+  it('the starting counts say they are before the first planned month', () => {
+    renderTeam(team(1));
+    const counts = screen.getByRole('group', { name: STARTING_COUNTS });
+    expect(within(counts).getAllByRole('spinbutton')).toHaveLength(4);
+    expect(screen.queryByRole('group', { name: 'Výchozí počty' })).toBeNull();
+  });
+});
+
+const LIMITS = [
+  { label: MAX_TWELVE, key: 'maxTwelve', max: 10, empty: 'obecně 3', over: '11' },
+  { label: MAX_NIGHTS, key: 'maxNights', max: 31, empty: 'bez limitu', over: '32' },
+] as const;
+
+describe.each(LIMITS)('the limit $label', (limit) => {
+  it(`is a number box of 0 to ${limit.max}, and empty for a person who has no limit`, () => {
+    renderTeam(team(2));
+    for (const card of [0, 1]) {
+      const box = field(limit.label, card);
+      expect(box).toHaveAttribute('type', 'number');
+      expect(box).toHaveAttribute('min', '0');
+      expect(box).toHaveAttribute('max', String(limit.max));
+      expect(box).toHaveAttribute('step', '1');
+      expect(box).toHaveValue(null);
+      expect(box).toHaveAttribute('placeholder', limit.empty);
+    }
+  });
+
+  it('shows the limit that is stored for each person, 0 among them', () => {
+    const data = team(3);
+    data.people[1][limit.key] = 5;
+    data.people[2][limit.key] = 0;
+    renderTeam(data);
+    expect([0, 1, 2].map((card) => (field(limit.label, card) as HTMLInputElement).value)).toEqual([
+      '',
+      '5',
+      '0',
+    ]);
+  });
+
+  it('is stored for the person of its card, and nothing else of anyone changes', async () => {
+    renderTeam(surveyed(3));
+    const before = people();
+    await enter(field(limit.label, 1), '2');
+    expect(people()[1]).toEqual({ ...before[1], [limit.key]: 2 });
+    expect([people()[0], people()[2]]).toEqual([before[0], before[2]]);
+  });
+
+  it('takes 0 and the most, and 0 is not an empty box', () => {
+    renderTeam(team(2));
+    paste(field(limit.label), String(limit.max));
+    expect(people()[0][limit.key]).toBe(limit.max);
+    paste(field(limit.label), '0');
+    expect(Object.is(people()[0][limit.key], 0)).toBe(true);
+    expect(field(limit.label)).toHaveValue(0);
+  });
+
+  it('keeps the limit that is stored for a number that is not good', async () => {
+    renderTeam(team(2));
+    const box = field(limit.label);
+    paste(box, '2');
+    await userEvent.click(box);
+    for (const text of [limit.over, '2.5', '-1', '1e1', '2.0000000001']) {
+      paste(box, text);
+      expect(people()[0][limit.key], text).toBe(2);
+      await userEvent.tab();
+      expect(box, text).toHaveValue(2);
+      await userEvent.click(box);
+    }
+  });
+
+  it('is cleared with the box: null is stored, once, and the placeholder shows', async () => {
+    renderTeam(team(2));
+    const box = field(limit.label);
+    paste(box, '3');
+    await userEvent.clear(box);
+    expect(people()[0][limit.key]).toBeNull();
+    expect(box).toHaveValue(null);
+    expect(box).toHaveAttribute('placeholder', limit.empty);
+
+    await userEvent.type(box, '-5'); // not good, so not stored: still no limit
+    const before = app.data;
+    await userEvent.clear(box); // the limit was not set and is not: nothing changes or is saved
+    expect(app.data).toBe(before);
+  });
+
+  it('shows the limits of another plan that is opened', async () => {
+    renderTeam(team(2));
+    await userEvent.type(field(limit.label), '4'); // a box with a number typed in it
+    const other = team(2);
+    other.people[0][limit.key] = null;
+    other.people[1][limit.key] = 6;
+    act(() => {
+      app.dispatch({ type: 'load', data: other });
+    });
+    expect(field(limit.label, 0)).toHaveValue(null);
+    expect(field(limit.label, 1)).toHaveValue(6);
+  });
+});
+
+describe('the placeholder of the 12-hour limit', () => {
+  it('names the general maximum, as the Rules screen has it now', () => {
+    const data = team(2);
+    data.settings.maxTwelvePerMonth = 4;
+    renderTeam(data);
+    expect(field(MAX_TWELVE, 0)).toHaveAttribute('placeholder', 'obecně 4');
+    expect(field(MAX_TWELVE, 1)).toHaveAttribute('placeholder', 'obecně 4');
+    act(() => {
+      app.dispatch({ type: 'updateSettings', patch: { maxTwelvePerMonth: 6 } });
+    });
+    expect(field(MAX_TWELVE, 0)).toHaveAttribute('placeholder', 'obecně 6');
+    expect(field(MAX_TWELVE, 1)).toHaveAttribute('placeholder', 'obecně 6');
+  });
+
+  it('is on a card whose limit is cleared, not on one that has a limit', () => {
+    const data = team(2);
+    data.people[1].maxTwelve = 2;
+    renderTeam(data);
+    expect(field(MAX_TWELVE, 0)).toHaveAttribute('placeholder', 'obecně 3');
+    expect(field(MAX_TWELVE, 1)).toHaveValue(2);
+  });
+});
+
 // --- Order ------------------------------------------------------------------------------------
 
 describe('the order of the team', () => {
@@ -621,21 +817,25 @@ describe('adding a person', () => {
 // --- Removing ---------------------------------------------------------------------------------
 
 describe('removing a person', () => {
-  it('asks with the name, and removes the person with their shifts and requests', async () => {
+  it('asks with the name, and removes the person, their shifts, requests and notes', async () => {
     const confirm = vi.spyOn(window, 'confirm').mockReturnValue(true);
     renderTeam(team(3));
     act(() => {
       app.dispatch({ type: 'setCell', date: '2027-01-05', personId: 'p1', cell: { code: 'R1' } });
       app.dispatch({ type: 'setCell', date: '2027-01-05', personId: 'p2', cell: { code: 'x' } });
+      const note = { from: 480, to: 720 };
+      app.dispatch({ type: 'setDoctor', date: '2027-01-05', personId: 'p1', note });
+      app.dispatch({ type: 'setDoctor', date: '2027-01-06', personId: 'p2', note });
     });
 
     await userEvent.click(button('Odebrat', 0));
     expect(confirm).toHaveBeenCalledOnce();
     expect(confirm).toHaveBeenCalledWith(
-      'Odebrat Operátor 1 z týmu? Smažou se i všechny směny a žádosti této osoby.',
+      'Odebrat Operátor 1 z týmu? Smažou se i všechny směny, žádosti a návštěvy lékaře této osoby.',
     );
     expect(names()).toEqual(['Operátor 2', 'Operátor 3']);
     expect(app.data?.cells).toEqual({ '2027-01-05': { p2: { code: 'x' } } });
+    expect(app.data?.doctor).toEqual({ '2027-01-06': { p2: { from: 480, to: 720 } } });
   });
 
   it('asks for the person of the card that was pressed, by the name as it is now', async () => {
@@ -644,7 +844,7 @@ describe('removing a person', () => {
     await enter(field('Jméno', 2), 'Jiné jméno');
     await userEvent.click(button('Odebrat', 2));
     expect(confirm).toHaveBeenCalledWith(
-      'Odebrat Jiné jméno z týmu? Smažou se i všechny směny a žádosti této osoby.',
+      'Odebrat Jiné jméno z týmu? Smažou se i všechny směny, žádosti a návštěvy lékaře této osoby.',
     );
     expect(names()).toEqual(['Operátor 1', 'Operátor 2', 'Operátor 4', 'Operátor 5']);
   });

@@ -1,5 +1,9 @@
-import { describe, expect, it } from 'vitest';
-import { storableNumber } from './form';
+// @vitest-environment jsdom
+import { fireEvent, render, screen } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
+import { createElement } from 'react';
+import { describe, expect, it, vi } from 'vitest';
+import { OptionalNumberField, storableNumber } from './form';
 
 // What a number box stores. The text is whatever the user typed or pasted; the answer is the number
 // to store, or null when the box must keep the number it has.
@@ -102,5 +106,127 @@ describe('storableNumber', () => {
     const typed = storableNumber('10.5', 8, 24, 0.5);
     expect(Object.is(typed, 10.5)).toBe(true);
     expect(Object.is(storableNumber('0', 0, 10, 1), 0)).toBe(true);
+  });
+});
+
+// --- OptionalNumberField ----------------------------------------------------------------------
+
+/** The label of the box in these tests; the range is 0 to 10 and the step 1, as for a limit. */
+const LIMIT = 'Limit';
+
+/** A box for a limit that may be unset, and a spy for what it stores. */
+function renderLimit(value: number | null) {
+  const onChange = vi.fn<(value: number | null) => void>();
+  const props = { label: LIMIT, min: 0, max: 10, placeholder: 'bez limitu', onChange };
+  const view = render(createElement(OptionalNumberField, { ...props, value }));
+  return {
+    box: screen.getByLabelText<HTMLInputElement>(LIMIT),
+    onChange,
+    /** Another value arrives from outside, as when another plan is opened. */
+    show: (shown: number | null) =>
+      view.rerender(createElement(OptionalNumberField, { ...props, value: shown })),
+  };
+}
+
+/** Replaces what is in a box, by typing. */
+async function enter(box: HTMLElement, text: string) {
+  await userEvent.clear(box);
+  await userEvent.type(box, text);
+}
+
+describe('OptionalNumberField', () => {
+  it('an empty optional number stores null', async () => {
+    const { box, onChange } = renderLimit(4);
+    await userEvent.clear(box);
+    expect(onChange).toHaveBeenCalledExactlyOnceWith(null);
+  });
+
+  it('stores a number that is good, and the last number typed stays', async () => {
+    const { box, onChange } = renderLimit(null);
+    await userEvent.type(box, '1');
+    await userEvent.type(box, '0'); // 10: the least and the most are in
+    expect(onChange.mock.calls).toEqual([[1], [10]]);
+  });
+
+  it('stores 0 as 0, not as an empty box', async () => {
+    const { box, onChange } = renderLimit(4);
+    await enter(box, '0');
+    expect(onChange.mock.calls).toEqual([[null], [0]]); // emptied on the way, then 0
+    expect(Object.is(onChange.mock.lastCall?.[0], 0)).toBe(true);
+  });
+
+  it('stores nothing for a number outside the range, off the step, or not a plain number', () => {
+    const { box, onChange } = renderLimit(4);
+    for (const text of ['11', '-1', '2.5', '1e1', '4.0000000001']) {
+      fireEvent.change(box, { target: { value: text } });
+    }
+    expect(onChange).not.toHaveBeenCalled();
+  });
+
+  it('stores nothing for the number that is stored already', () => {
+    const { box, onChange } = renderLimit(4);
+    fireEvent.change(box, { target: { value: '04' } }); // 4, written another way
+    expect(onChange).not.toHaveBeenCalled();
+  });
+
+  it('stores nothing for a limit that was not set and is cleared again', async () => {
+    const { box, onChange } = renderLimit(null);
+    await userEvent.type(box, '-5'); // not good, so not stored: still no limit
+    await userEvent.clear(box);
+    expect(onChange).not.toHaveBeenCalled();
+  });
+
+  it('keeps the limit while the box holds what a browser reports as an empty value', () => {
+    // A browser gives '' for a box that holds a minus sign or a letter, and says so in
+    // `validity.badInput`. That box is not empty, so it does not clear the limit.
+    const { box, onChange } = renderLimit(4);
+    Object.defineProperty(box, 'validity', { value: { badInput: true }, configurable: true });
+    fireEvent.change(box, { target: { value: '' } });
+    expect(onChange).not.toHaveBeenCalled();
+  });
+
+  it('is a number box of the range given, step 1, with the stored number in it', () => {
+    const set = renderLimit(4);
+    expect(set.box).toHaveValue(4);
+    expect(set.box).toHaveAttribute('placeholder', 'bez limitu');
+    expect(set.box).toHaveAttribute('type', 'number');
+    expect(set.box).toHaveAttribute('min', '0');
+    expect(set.box).toHaveAttribute('max', '10');
+    expect(set.box).toHaveAttribute('step', '1');
+  });
+
+  it('shows an empty box, with the placeholder, for a limit that is not set', () => {
+    const { box } = renderLimit(null);
+    expect(box).toHaveValue(null);
+    expect(box).toHaveAttribute('placeholder', 'bez limitu');
+  });
+
+  it('shows an empty box again when it is left with a letter in it', () => {
+    // A browser keeps a letter in the box and gives '' for its value, so that the text of the box
+    // stays '' and the box is not drawn again. jsdom keeps no letter, so a '7' that the box shows
+    // and its text does not hold stands for one.
+    const { box } = renderLimit(null);
+    Object.defineProperty(box, 'validity', { value: { badInput: true }, configurable: true });
+    box.value = '7';
+    fireEvent.blur(box);
+    expect(box).toHaveValue(null);
+  });
+
+  it('shows the stored value again when the box is left', async () => {
+    const { box } = renderLimit(4);
+    await userEvent.click(box);
+    fireEvent.change(box, { target: { value: '11' } }); // not good: nothing is stored
+    await userEvent.tab();
+    expect(box).toHaveValue(4);
+  });
+
+  it('shows a value that arrives from outside, an empty one among them', () => {
+    const { box, show } = renderLimit(4);
+    show(7);
+    expect(box).toHaveValue(7);
+    show(null);
+    expect(box).toHaveValue(null);
+    show(0);
+    expect(box).toHaveValue(0);
   });
 });

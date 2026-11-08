@@ -84,9 +84,9 @@ export const TEAM_SCREEN = {
   moveUp: 'Posunout nahoru',
   moveDown: 'Posunout dolů',
   remove: 'Odebrat',
-  /** Asked before a person is removed. Their shifts and requests go with them. */
+  /** Asked before a person is removed. Their shifts, requests and doctor's visits go with them. */
   confirmRemove: (name: string): string =>
-    `Odebrat ${name} z týmu? Smažou se i všechny směny a žádosti této osoby.`,
+    `Odebrat ${name} z týmu? Smažou se i všechny směny, žádosti a návštěvy lékaře této osoby.`,
   activeFrom: 'V týmu od',
   activeTo: 'V týmu do',
   nights: 'Noční',
@@ -96,7 +96,18 @@ export const TEAM_SCREEN = {
   notes: 'Poznámka',
   /** The yearly days of each absence. */
   allowance: { DOV: 'Dovolená / rok', MD: 'MyDay / rok' },
-  startingCounts: 'Výchozí počty',
+  /** The limits of a person (spec 3.6). Each may be left empty. */
+  maxTwelve: 'Max. 12h směn měsíčně',
+  /** In the empty box of the 12h limit: the general maximum, as the Rules screen has it. */
+  maxTwelveGeneral: (general: number): string => `obecně ${general}`,
+  maxNights: 'Max. nočních měsíčně',
+  /** In the empty box of the nights limit. */
+  maxNightsNone: 'bez limitu',
+  /**
+   * The counts before the first planned month, i.e. the first month with a record in the file: the
+   * months after it count on from these (spec 3.7).
+   */
+  startingCounts: 'Počáteční počty (před prvním naplánovaným měsícem)',
   /** The counts a person starts with, by what is counted. */
   counts: {
     twelve: '12h směny',
@@ -189,24 +200,29 @@ export const MONTH_SCREEN = {
   },
 };
 
-/** The Rules screen: its two sections, and the numbers of the first. */
+/** The Rules screen: its two sections, and the numbers of the first, in the order of the screen. */
 export const RULES_SCREEN = {
   settings: 'Nastavení',
   wishes: 'Důležitost přání',
   minRest: 'Odpočinek mezi směnami (h)',
+  weeklyRest: 'Týdenní odpočinek (h)',
+  maxDaysInRow: 'Max. dní v kuse',
   maxTwelve: 'Max. 12h směn za měsíc',
+  minWeekendShifts: 'Min. víkendových směn měsíčně',
   twelveTarget: 'Cíl 12h směn za měsíc',
   timeBudget: 'Čas na generování (s)',
 };
 
 /**
- * What each wish is called on the Rules screen. W5a is not `Cíl 12h směn za měsíc`, as the plan
- * has it: the number of 12-hour shifts is called that, and two controls must not share a name.
+ * What each wish is called on the Rules screen, in the order of the screen: it lists the wishes in
+ * the order of these keys. W5a is not `Cíl 12h směn za měsíc`, as the plan has it: the number of
+ * 12-hour shifts is called that, and two controls must not share a name. W3 is named after what
+ * it charges: two days off after six working days is the must M10, not the wish.
  */
 export const WISH_LABELS: Record<WishId, string> = {
   W1: 'Co nejméně přesčasů',
   W2: 'Stejná směna 4–5 dní v řadě',
-  W3: 'Po 5–6 dnech 2 dny volna',
+  W3: 'Nejvýš 5 dní v kuse, pak 2 dny volna',
   W4a: 'Noční v delších blocích',
   W4b: 'Před nočními volno (a předtím R2, O20 nebo O)',
   W4c: 'Po nočních 2 dny volna',
