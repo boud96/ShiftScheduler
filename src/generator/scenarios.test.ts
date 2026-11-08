@@ -1,11 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import { Code, isAbsence, isNight, isShift } from '../domain/codes';
+import { CODE_NAMES, Code, isAbsence, isNight, isShift } from '../domain/codes';
 import { applyRows, buildMonthGrid } from '../domain/context';
 import type { MonthGrid } from '../domain/context';
 import { evaluateMonth } from '../domain/rules/evaluate';
 import type { MonthEval } from '../domain/rules/evaluate';
-import { GAP } from '../domain/rules/weights';
-import type { ISODate, PersonId } from '../domain/types';
+import type { Finding } from '../domain/rules/types';
+import { GAP, HARD } from '../domain/rules/weights';
+import type { AppData, ISODate, MonthKey, PersonId, ShiftName } from '../domain/types';
 import { scenario } from '../test/scenarios';
 import type { ScenarioName } from '../test/scenarios';
 import { search } from './search';
@@ -14,18 +15,21 @@ import { search } from './search';
  * Counted in iterations, with no time budget: a scenario and a seed always give the same month.
  *
  * 300,000 iterations are too few for the search to settle, so each run is a draw. Over seeds 1-24
- * the committed search passes these checks on jan2027 21/24 (39/48 over 1-48), feb2027 22/24,
- * dec2027 23/24, impossible 22/24, and mar2027, jul2027, pins and monthEnd 24/24 (monthEnd was
- * 9/24 before the engine looked at the day after the month). So after a change to the rules, the
- * weights, construct or the moves, a red run may be seed noise. Before changing a seed or an
- * assertion, compare the pass rates over many seeds before and after the change, and keep the
- * change only if no scenario's rate drops. Never weaken an assertion to make a seed pass.
+ * the committed search passes these checks on every scenario 24/24 but doctor, 19/24 (over 1-96:
+ * jan2027 96/96, doctor 73/96). Phase 1 passed jan2027 21/24, feb2027 22/24, dec2027 23/24 and
+ * impossible 22/24; the Phase 1.1 rules took jan2027 down to 0/24 and dec2027 and impossible to
+ * 9/24, until the exchange moves, the shifts that only one person can take in the first draft and
+ * the shape of W5b. So after a change to the rules, the weights, construct or the moves, a red run
+ * may be seed noise. Before changing a seed or an assertion, compare the pass rates over many seeds
+ * before and after the change, and keep the change only if no scenario's rate drops. Never weaken
+ * an assertion to make a seed pass.
  *
  * SCENARIO_SEEDS (such as `1-24` or `1,5,7-9`) replaces the seeds of every scenario. A sweep, one
  * process per scenario:
  *
  *   d=$(mktemp -d)
- *   for s in jan2027 feb2027 mar2027 dec2027 jul2027 impossible pins monthEnd; do
+ *   for s in jan2027 feb2027 mar2027 dec2027 jul2027 impossible pins monthEnd q1-2027 \
+ *       claimed-holiday x-weekends doctor; do
  *     SCENARIO_SEEDS=1-24 npx vitest run src/generator/scenarios.test.ts -t $s > $d/$s.txt &
  *   done; wait; grep 'Tests ' $d/*.txt
  */
@@ -65,16 +69,73 @@ async function generate(name: ScenarioName, seed: number): Promise<Generated> {
   return { g, rows: r.rows, ev: evaluateMonth(g.ctx, r.rows, true) };
 }
 
+/** A finding as one line: its rule, its person, its dates and its message. */
+function line(g: MonthGrid, f: Finding): string {
+  const who = f.person === null ? '' : `${g.personIds[f.person]} `;
+  const when = f.days.map((i) => g.ctx.days[i].date).join(', ');
+  return `${f.rule} ${who}${when}: ${f.message}`;
+}
+
 /** The broken musts, one line each: what a failing `mustUnits` check shows. */
 function musts(g: MonthGrid, ev: MonthEval): string {
-  const lines = ev.findings
-    .filter((f) => f.severity === 'must')
-    .map((f) => {
-      const who = f.person === null ? '' : `${g.personIds[f.person]} `;
-      const when = f.days.map((i) => g.ctx.days[i].date).join(', ');
-      return `${f.rule} ${who}${when}: ${f.message}`;
-    });
+  const lines = ev.findings.filter((f) => f.severity === 'must').map((f) => line(g, f));
   return `broken musts:\n${lines.join('\n')}`;
+}
+
+/** The longest run of days with a shift in `row` that has a day of the month, the tail included. */
+function longestRun(g: MonthGrid, row: Uint8Array): number {
+  let longest = 0;
+  let run = 0;
+  for (let i = 0; i < row.length; i++) {
+    run = isShift(row[i]) ? run + 1 : 0;
+    if (i >= g.ctx.first) longest = Math.max(longest, run);
+  }
+  return longest;
+}
+
+/**
+ * What every month of the Phase 1.1 scenarios asks of the generator: no broken must that costs
+ * HARD, every shift covered, no run of more than 6 working days, and neither too few days off
+ * after a long run (M10) nor too little weekly rest (M11). The runs are counted on the rows, not
+ * by the engine. M6 and M12, which may be left short when they must, are left to each test.
+ */
+function expectSound(g: MonthGrid, rows: Uint8Array[], ev: MonthEval): void {
+  const { month } = g.ctx;
+  const hard = ev.findings.filter((f) => f.severity === 'must' && f.penalty >= HARD);
+  expect(hard.map((f) => line(g, f)), `${month}: musts that cost HARD`).toEqual([]);
+  const coverage = ev.findings.filter((f) => f.rule === 'M1');
+  expect(coverage.map((f) => line(g, f)), `${month}: coverage`).toEqual([]);
+  rows.forEach((row, k) => {
+    const id = g.personIds[k];
+    expect(longestRun(g, row), `${month}: ${id}'s longest run`).toBeLessThanOrEqual(6);
+  });
+  const rest = ev.findings.filter((f) => f.rule === 'M10' || f.rule === 'M11');
+  expect(rest.map((f) => line(g, f)), `${month}: days off and weekly rest`).toEqual([]);
+}
+
+/**
+ * Whether the shifts in `row` keep an hour clear of a doctor's appointment on day `i`, from `from`
+ * to `to` minutes after midnight: the shift of that day, and a night of the day before, which ends
+ * on it. A shift that ends an hour before the appointment, or starts an hour after it, is clear.
+ */
+function clearOfDoctor(
+  g: MonthGrid,
+  row: Uint8Array,
+  i: number,
+  from: number,
+  to: number,
+): boolean {
+  const { shifts } = g.ctx.settings;
+  const near = (start: number, end: number) => start < to + 60 && end > from - 60;
+  if (isShift(row[i])) {
+    const { start, end } = shifts[CODE_NAMES[row[i]] as ShiftName];
+    if (near(start, end)) return false;
+  }
+  if (isNight(row[i - 1])) {
+    const { start, end } = shifts[CODE_NAMES[row[i - 1]] as ShiftName];
+    if (near(start - 1440, end - 1440)) return false;
+  }
+  return true;
 }
 
 /** The row of person `id`. */
@@ -206,7 +267,9 @@ describe('generator scenarios', () => {
     'impossible, seed %i: leaves only the 2 shifts no one can take uncovered, and bends no limit',
     async (seed) => {
       const { g, ev } = await generate('impossible', seed);
-      const bent = ['M2', 'M3', 'M4', 'M5', 'M7', 'M8'];
+      // every must that costs HARD; a night for someone who never works nights (S1) is a strong
+      // wish, which the generator may give to cover a night
+      const bent = ['M2', 'M3', 'M4', 'M5', 'M8', 'M9', 'M10', 'M11', 'M13'];
       expect(ev.findings.filter((f) => bent.includes(f.rule))).toEqual([]);
 
       const coverage = ev.findings.filter((f) => f.rule === 'M1');
@@ -256,6 +319,100 @@ describe('generator scenarios', () => {
         (f) => f.severity === 'must' && (f.rule === 'M2' || f.rule === 'M4'),
       );
       expect(wrong.map((f) => f.message)).toEqual([]);
+    },
+    TIMEOUT,
+  );
+
+  it.each(seeds([1]))(
+    'q1-2027, seed %i: January to March one after another, each sound, and over the quarter ' +
+      'twelve-hour shifts within 2 of one another',
+    async (seed) => {
+      let data: AppData = scenario('q1-2027').data;
+      const twelve = new Map<PersonId, number>(data.people.map((person) => [person.id, 0]));
+      for (const month of ['2027-01', '2027-02', '2027-03'] as MonthKey[]) {
+        const g = buildMonthGrid(data, month);
+        // the months before, generated and applied, are history: their record makes them count
+        g.ctx.people.forEach((person) => {
+          expect(person.history.twelve, `${month}: ${person.id}'s history`).toBe(
+            twelve.get(person.id),
+          );
+        });
+        const r = await search(g.ctx, g.rows, g.fixed, { seed, maxIterations: ITERATIONS });
+        const ev = evaluateMonth(g.ctx, r.rows, true);
+        expectSound(g, r.rows, ev);
+        ev.persons.forEach((p, k) => {
+          const id = g.personIds[k];
+          twelve.set(id, (twelve.get(id) ?? 0) + p.twelve - p.claimedTwelve);
+        });
+        // as the app applies a generated month: its cells, and its record as a draft
+        data = applyRows(data, month, r.rows, g.fixed);
+        data = { ...data, months: { ...data.months, [month]: { status: 'draft', seed } } };
+      }
+      const allQuarter = data.people.filter(
+        (person) =>
+          (person.activeFrom === null || person.activeFrom <= '2027-01-01') &&
+          (person.activeTo === null || person.activeTo >= '2027-03-31'),
+      );
+      const counts = allQuarter.map((person) => twelve.get(person.id) ?? 0);
+      const spread = Math.max(...counts) - Math.min(...counts);
+      expect(spread, `12-hour shifts over the quarter: ${counts}`).toBeLessThanOrEqual(2);
+    },
+    TIMEOUT,
+  );
+
+  it.each(seeds([1]))(
+    'claimed-holiday, seed %i: C keeps the claimed R12 of New Year\'s Day and may have 4 ' +
+      'twelve-hour shifts, since the claim counts toward neither the minimum nor the maximum',
+    async (seed) => {
+      const { g, rows, ev } = await generate('claimed-holiday', seed);
+      expectSound(g, rows, ev);
+      const c = g.personIds.indexOf('C');
+      expect(rows[c][dayOf(g, '2027-01-01')]).toBe(Code.R12);
+      expect(ev.persons[c].claimedTwelve).toBe(1);
+      expect(ev.persons[c].twelve).toBeLessThanOrEqual(4);
+      const limits = ev.findings.filter(
+        (f) => f.person === c && (f.rule === 'M5' || f.rule === 'M12'),
+      );
+      expect(limits.map((f) => line(g, f)), 'C\'s minimum and maximum').toEqual([]);
+    },
+    TIMEOUT,
+  );
+
+  it.each(seeds([1]))(
+    'x-weekends, seed %i: D, free on one Saturday only, has at most 1 weekend shift, Kontrola ' +
+      'shows M12 for D, and nothing else gives way',
+    async (seed) => {
+      const { g, rows, ev } = await generate('x-weekends', seed);
+      expectSound(g, rows, ev);
+      const d = g.personIds.indexOf('D');
+      expect(ev.persons[d].twelve).toBeLessThanOrEqual(1);
+      const short = ev.findings.filter((f) => f.rule === 'M12' && f.person === d);
+      expect(short.map((f) => f.severity)).toEqual(['must']);
+    },
+    TIMEOUT,
+  );
+
+  it.each(seeds([1]))(
+    'doctor, seed %i: no must that costs HARD, and at least half of the shifts on days with a ' +
+      'doctor\'s appointment keep an hour clear of it',
+    async (seed) => {
+      const { data } = scenario('doctor');
+      const { g, rows, ev } = await generate('doctor', seed);
+      expectSound(g, rows, ev);
+      // W10 is quiet, so Kontrola shows nothing of it: the rows tell
+      let withShift = 0;
+      let clear = 0;
+      for (const [date, notes] of Object.entries(data.doctor)) {
+        for (const [id, note] of Object.entries(notes)) {
+          const row = rowOf(g, rows, id);
+          const i = dayOf(g, date);
+          if (!isShift(row[i])) continue;
+          withShift++;
+          if (clearOfDoctor(g, row, i, note.from, note.to)) clear++;
+        }
+      }
+      expect(withShift, 'appointments on a day with a shift').toBeGreaterThan(0);
+      expect(clear, `clear of ${withShift} appointments`).toBeGreaterThanOrEqual(withShift / 2);
     },
     TIMEOUT,
   );
