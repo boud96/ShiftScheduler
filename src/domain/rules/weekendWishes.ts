@@ -13,7 +13,10 @@ function unsuitedNextToR12(code: number): boolean {
   return code >= Code.O20 && code <= Code.N;
 }
 
-/** W5a: the squared distance of the person's 12-hour shifts from the target of the month. */
+/**
+ * W5a: the squared distance of the person's 12-hour shifts from the target of the month. A claimed
+ * holiday shift is extra and is no part of the count.
+ */
 function twelveShifts(
   ctx: MonthContext,
   p: number,
@@ -22,11 +25,12 @@ function twelveShifts(
   sink?: Sink,
 ): number {
   const { twelveTarget } = ctx.settings;
-  const gap = stats.twelve - twelveTarget;
+  const counted = stats.twelve - stats.claimedTwelve;
+  const gap = counted - twelveTarget;
   const penalty = gap * gap * ctx.weights.W5a;
   if (sink !== undefined && penalty > 0) {
-    const message = `${fmtTwelveShifts(stats.twelve)} (cíl ${fmtH(twelveTarget)})`;
-    report(sink, 'W5a', p, twelveDays(ctx, row), message, penalty);
+    const message = `${fmtTwelveShifts(counted)} (cíl ${fmtH(twelveTarget)})`;
+    report(sink, 'W5a', p, twelveDays(ctx, p, row), message, penalty);
   }
   return penalty;
 }
@@ -141,8 +145,8 @@ function nextToR12(
 
 /**
  * Wishes W5a to W5d for person `p`, whose month `row` has been counted into `stats` already (W5a
- * reads `twelve`, W5d uses it to skip a month with no R12). Each unit costs the weight of its wish
- * in `ctx.weights`. Returns the person's score.
+ * reads `twelve` and `claimedTwelve`, W5d uses `twelve` to skip a month with no R12). Each unit
+ * costs the weight of its wish in `ctx.weights`. Returns the person's score.
  *
  * Weekends count only if both days are in the month, so the previous month's tail never takes
  * part in W5a, W5b or W5c. W5d reads the last day of the tail, for the pair it makes with day 1.

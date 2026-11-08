@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { fmtH, days, shortDate, twelveShifts } from './format';
+import { fmtH, days, nightShifts, shortDate, twelveShifts, weekendShifts } from './format';
 
 describe('fmtH', () => {
   it('prints whole hours without a decimal part', () => {
@@ -45,6 +45,36 @@ describe('twelveShifts', () => {
     expect(twelveShifts(11)).toBe('11 dvanáctihodinových směn');
     expect(twelveShifts(21)).toBe('21 dvanáctihodinových směn');
     expect(twelveShifts(22)).toBe('22 dvanáctihodinových směn');
+  });
+});
+
+describe('weekendShifts', () => {
+  it('uses the Czech plural forms of "víkendová směna"', () => {
+    expect(weekendShifts(1)).toBe('1 víkendová směna');
+    expect(weekendShifts(2)).toBe('2 víkendové směny');
+    expect(weekendShifts(3)).toBe('3 víkendové směny');
+    expect(weekendShifts(4)).toBe('4 víkendové směny');
+    expect(weekendShifts(5)).toBe('5 víkendových směn');
+  });
+  it('treats 0 and the numbers from 5 up as the many form', () => {
+    expect(weekendShifts(0)).toBe('0 víkendových směn');
+    expect(weekendShifts(11)).toBe('11 víkendových směn');
+    expect(weekendShifts(22)).toBe('22 víkendových směn');
+  });
+});
+
+describe('nightShifts', () => {
+  it('uses the Czech plural forms of "noční"', () => {
+    expect(nightShifts(1)).toBe('1 noční');
+    expect(nightShifts(2)).toBe('2 noční');
+    expect(nightShifts(3)).toBe('3 noční');
+    expect(nightShifts(4)).toBe('4 noční');
+    expect(nightShifts(5)).toBe('5 nočních');
+  });
+  it('treats 0 and the numbers from 5 up as the many form', () => {
+    expect(nightShifts(0)).toBe('0 nočních');
+    expect(nightShifts(11)).toBe('11 nočních');
+    expect(nightShifts(22)).toBe('22 nočních');
   });
 });
 

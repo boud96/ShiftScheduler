@@ -31,7 +31,11 @@ function spread(people: number, sum: number, squares: number): number {
   return (people * squares - sum * sum) / people;
 }
 
-/** The total of `count` for person `p`: the history plus the month. */
+/**
+ * The total of `count` for person `p`: the history plus the month. A claimed holiday shift is no
+ * 12-hour shift of the month here, as it is none in the history (see `monthCounts`); it still
+ * counts as a shift on a holiday.
+ */
 function totalOf(
   ctx: MonthContext,
   persons: PersonStats[],
@@ -42,7 +46,7 @@ function totalOf(
   const stats = persons[p];
   switch (count) {
     case 'twelve':
-      return history.twelve + stats.twelve;
+      return history.twelve + stats.twelve - stats.claimedTwelve;
     case 'nights':
       return history.nights + stats.nights;
     case 'holidayTwelve':

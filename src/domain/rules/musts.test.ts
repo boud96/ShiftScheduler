@@ -1,10 +1,12 @@
 import { describe, it, expect } from 'vitest';
 import { ctxFor, noWishes, rowsOf, run, rules } from '../../test/rulekit';
+import type { PersonPatch } from '../../test/rulekit';
 import { buildMonthGrid } from '../context';
+import type { MonthContext } from '../context';
 import { defaultSettings, newAppData } from '../defaults';
-import type { CodeName } from '../types';
+import type { CodeName, Settings } from '../types';
 import { evaluateMonth } from './evaluate';
-import { BELOW_FPD, GAP, HARD } from './weights';
+import { BELOW_FPD, GAP, HARD, STRONG, WEEKEND_SHORT } from './weights';
 const c = ctxFor('2027-02', 1);
 const n = (strip: string, id: Parameters<typeof rules>[1], tail?: string) =>
   rules(run(c, rowsOf(c, [strip], tail ? [tail] : [])), id).length;
@@ -36,9 +38,9 @@ describe('musts', () => {
     expect(f).toHaveLength(1);
     expect(f[0].message).toBe('22,5 h z 150 h: chybí 127,5 h do FPD');
   });
-  it('M7: never nights', () => {
+  it('S1: never nights', () => {
     const v = ctxFor('2027-02', [{ prefs: { nights: 'never' } }]);
-    expect(rules(run(v, rowsOf(v, ['N N - - - N12'])), 'M7')).toHaveLength(3);
+    expect(rules(run(v, rowsOf(v, ['N N - - - N12'])), 'S1')).toHaveLength(3);
   });
   it('M8: day type', () => { expect(n('R12 - - - - R1', 'M8')).toBe(2); });
   it('M3: outside the active period', () => {
@@ -223,22 +225,28 @@ describe('M6 in detail', () => {
   });
 });
 
-describe('M7 in detail', () => {
+describe('S1 in detail', () => {
   const never = ctxFor('2027-02', [{ prefs: { nights: 'never' } }]);
-  it('is one finding per night shift, on its cell', () => {
-    const f = rules(run(never, rowsOf(never, ['N - - - - N12 N12'])), 'M7');
+  it('is one finding per night shift, on its cell, worth STRONG', () => {
+    const f = rules(run(never, rowsOf(never, ['N - - - - N12 N12'])), 'S1');
     expect(f.map((x) => x.days)).toEqual([[never.first], [never.first + 5], [never.first + 6]]);
     expect(f[0]).toEqual({
-      rule: 'M7', severity: 'must', person: 0, days: [never.first],
-      message: 'noční směna, ale noční nechce', penalty: HARD,
+      rule: 'S1', severity: 'wish', strong: true, person: 0, days: [never.first],
+      message: 'noční směna, ale noční nechce', penalty: STRONG,
     });
   });
   it.each(['normal', 'ifNeeded', 'extra'] as const)('allows nights for %s', (nights) => {
     const k = ctxFor('2027-02', [{ prefs: { nights } }]);
-    expect(rules(run(k, rowsOf(k, ['N'])), 'M7')).toHaveLength(0);
+    expect(rules(run(k, rowsOf(k, ['N'])), 'S1')).toHaveLength(0);
   });
   it('ignores a night in the previous month', () => {
-    expect(rules(run(never, rowsOf(never, [], ['- - - - - - N'])), 'M7')).toHaveLength(0);
+    expect(rules(run(never, rowsOf(never, [], ['- - - - - - N'])), 'S1')).toHaveLength(0);
+  });
+  it('carries no strong mark on any other finding', () => {
+    const ev = run(never, rowsOf(never, ['N R12 O R1 O20 R12']));
+    const others = ev.findings.filter((f) => f.rule !== 'S1');
+    expect(others.length).toBeGreaterThan(0);
+    expect(others.every((f) => !('strong' in f))).toBe(true);
   });
 });
 
@@ -309,9 +317,13 @@ describe('M1 in detail', () => {
 });
 
 // An exact score is the score of the musts alone only with the wishes off. At their default levels
-// a wish adds its own penalty, and the global wishes add a term of their own.
+// a wish adds its own penalty, and the global wishes add a term of their own. The weekend minimum
+// (M12) is switched off in these contexts too: it is tested apart, and would add a unit and a score
+// for the weekend shifts that a person has not got.
 describe('must units and scores', () => {
-  const k = ctxFor('2027-02', 1, { coverage: noCoverage, wishLevels: noWishes() });
+  const k = ctxFor('2027-02', 1, {
+    coverage: noCoverage, wishLevels: noWishes(), minWeekendShifts: 0,
+  });
   it('count a unit per broken rule or shift over the limit, and one for being below FPD', () => {
     const rest = run(k, rowsOf(k, ['O R1']));
     expect(rest.persons[0].mustUnits).toBe(2); // M2 and M6
@@ -323,7 +335,7 @@ describe('must units and scores', () => {
     expect(twelve.score).toBe(2 * HARD + BELOW_FPD * (150 - 57.5));
   });
   it('count a missing person for each gap, and a person below FPD', () => {
-    const bare = ctxFor('2027-02', 1, { wishLevels: noWishes() });
+    const bare = ctxFor('2027-02', 1, { wishLevels: noWishes(), minWeekendShifts: 0 });
     const ev = run(bare, rowsOf(bare, []));
     expect(ev.mustUnits).toBe(20 * 5 + 8 * 2 + 1);
     expect(ev.score).toBe((20 * 5 + 8 * 2) * GAP + BELOW_FPD * 150);
@@ -438,7 +450,9 @@ describe('the day after the month', () => {
   });
 
   describe('score and units', () => {
-    const k = ctxFor('2027-02', [{ nextDay: 'x' }], { coverage: noCoverage, wishLevels: noWishes() });
+    const k = ctxFor('2027-02', [{ nextDay: 'x' }], {
+      coverage: noCoverage, wishLevels: noWishes(), minWeekendShifts: 0,
+    });
     it('count a unit and HARD for each, with a sink or without', () => {
       const ev = run(k, rowsOf(k, [at(27, 'N12')]));
       expect(ev.persons[0].mustUnits).toBe(2); // M4, and M6 for the hours short of FPD
@@ -446,16 +460,256 @@ describe('the day after the month', () => {
       expect(evaluateMonth(k, rowsOf(k, [at(27, 'N12')]))).toMatchObject({ mustUnits: 2, score: ev.score });
     });
     it('are what they were when nothing is stored for the day after', () => {
-      const bare = ctxFor('2027-02', 1, { coverage: noCoverage, wishLevels: noWishes() });
+      const bare = ctxFor('2027-02', 1, {
+        coverage: noCoverage, wishLevels: noWishes(), minWeekendShifts: 0,
+      });
       const ev = run(bare, rowsOf(bare, [at(27, 'N12')]));
       expect(ev.persons[0].mustUnits).toBe(1);
       expect(ev.score).toBe(BELOW_FPD * (150 - 11.5));
     });
     it('add the unit to the person of the last day only, and leave the others alone', () => {
       const two = ctxFor('2027-02', [{ nextDay: 'x' }, { nextDay: 'x' }],
-        { coverage: noCoverage, wishLevels: noWishes() });
+        { coverage: noCoverage, wishLevels: noWishes(), minWeekendShifts: 0 });
       const ev = run(two, rowsOf(two, [at(27, 'N12'), at(27, 'R12')]));
       expect(ev.persons.map((s) => s.mustUnits)).toEqual([2, 1]);
     });
+  });
+});
+
+// Phase 1.1: the strong wish S1, the weekend minimum (M12), the limits of a person (M5, M13) and
+// the claimed holiday shifts, which are extra. February 2027 starts on a Monday, so its weekends
+// are days 5-6, 12-13, 19-20 and 26-27 (counted from 0). January 2027 starts on Friday 1 Jan, a
+// public holiday: day 0 is a holiday and its weekends are days 1-2, 8-9, 15-16, 22-23 and 29-30.
+
+/** A strip with the codes of `shifts` (a day counted from 0, and its code), nothing elsewhere. */
+const strip = (shifts: Record<number, string>): string => {
+  const last = Math.max(...Object.keys(shifts).map(Number));
+  return Array.from({ length: last + 1 }, (_, d) => shifts[d] ?? '-').join(' ');
+};
+/** A strip with R12 on the given days (counted from 0). */
+const r12 = (...days: number[]): string => strip(Object.fromEntries(days.map((d) => [d, 'R12'])));
+/** A month with nothing to score but the rules of the person: no coverage, no FPD, no wishes. */
+const bare = (people: PersonPatch[], settings: Partial<Settings> = {}, month = '2027-02') =>
+  ctxFor(month, people, {
+    coverage: noCoverage, fpdHoursPerWeekday: 0, wishLevels: noWishes(), ...settings,
+  });
+/** January 2027, with the R12 on Fri 1 Jan (a public holiday) pinned for the person: claimed. */
+const claimedJan = ctxFor('2027-01', [{ pinned: { '2027-01-01': 'R12' } }]);
+/** The same January, with nothing pinned. */
+const plainJan = ctxFor('2027-01', 1);
+/** The findings of rule `id` for the strips of a team. */
+const found = (ctx: MonthContext, id: Parameters<typeof rules>[1], ...strips: string[]) =>
+  rules(run(ctx, rowsOf(ctx, strips)), id);
+/** The M13 findings of a February with a person whose maximum of nights is `maxNights`. */
+const overNights = (maxNights: number | null, month: string, tail = '') => {
+  const k = ctxFor('2027-02', [{ maxNights }]);
+  return rules(run(k, rowsOf(k, [month], tail === '' ? [] : [tail])), 'M13');
+};
+
+describe('strong wish, weekend minimum, limits and claimed holidays', () => {
+  it('a night for a never person is a strong wish, not a must', () => {
+    const solo = bare([{ prefs: { nights: 'never' } }], { minWeekendShifts: 0 });
+    const ev = run(solo, rowsOf(solo, ['N']));
+    expect(rules(ev, 'S1')).toEqual([{
+      rule: 'S1', severity: 'wish', strong: true, person: 0, days: [solo.first],
+      message: 'noční směna, ale noční nechce', penalty: STRONG,
+    }]);
+    expect(ev.findings.filter((f) => f.severity === 'must')).toEqual([]);
+    expect([ev.persons[0].mustUnits, ev.mustUnits, ev.score]).toEqual([0, 0, STRONG]);
+  });
+  it('a claimed holiday shift is extra', () => {
+    // 1 Jan is claimed (a pinned R12 on a holiday); Sat 2, Sun 3 and Sat 9 Jan are 3 weekend shifts
+    expect(found(claimedJan, 'M5', r12(0, 1, 2, 8))).toEqual([]);
+    // the same shifts with no claim are 4 twelve-hour shifts, one too many
+    expect(found(plainJan, 'M5', r12(0, 1, 2, 8))).toHaveLength(1);
+    // a 4th shift that is not claimed breaks M5
+    expect(found(claimedJan, 'M5', r12(0, 1, 2, 8, 9))).toHaveLength(1);
+  });
+  it('the weekend minimum', () => {
+    expect(found(c, 'M12', r12(5))).toMatchObject([{ rule: 'M12', penalty: WEEKEND_SHORT }]);
+    expect(found(c, 'M12', r12(5, 6))).toEqual([]);
+    // a claimed holiday does not count: 1 Jan and Sat 2 Jan are one weekend shift
+    expect(found(claimedJan, 'M12', r12(0, 1))).toMatchObject([{ penalty: WEEKEND_SHORT }]);
+  });
+  it("a person's own maximum replaces the general one", () => {
+    const k = ctxFor('2027-02', [{ maxTwelve: 4 }, {}]);
+    const ev = run(k, rowsOf(k, [r12(5, 6, 12, 13), r12(5, 6, 12, 13)]));
+    expect(rules(ev, 'M5').map((f) => f.person)).toEqual([1]);
+  });
+  it('max nights', () => {
+    expect(overNights(2, 'N N N')).toHaveLength(1);
+    expect(overNights(0, 'N')).toHaveLength(1); // a maximum of 0 is no night at all
+    expect(overNights(null, 'N N N N N N')).toEqual([]); // no limit
+  });
+});
+
+describe('a claimed holiday shift is extra, in detail', () => {
+  it('is read from a pinned R12 on a holiday', () => {
+    expect(claimedJan.people[0].claimed[claimedJan.first]).toBe(1);
+    expect(plainJan.people[0].claimed[plainJan.first]).toBe(0);
+  });
+  it('is counted in the stats apart from the 12-hour shifts that count', () => {
+    const ev = run(claimedJan, rowsOf(claimedJan, [r12(0, 1, 2, 8)]));
+    expect(ev.persons[0]).toMatchObject({ twelve: 4, claimedTwelve: 1 });
+  });
+  it('leaves a fourth shift that is not claimed to M5, and names the shifts that count', () => {
+    expect(found(claimedJan, 'M5', r12(0, 1, 2, 8, 9))).toEqual([{
+      rule: 'M5', severity: 'must', person: 0,
+      days: [1, 2, 8, 9].map((d) => claimedJan.first + d),
+      message: '4 dvanáctihodinové směny (max. 3)', penalty: HARD,
+    }]);
+  });
+  it('is a must unit only for the shifts that count', () => {
+    // five shifts, one claimed: one over the maximum of 3 (and no weekend minimum to meet)
+    const k = bare([{ pinned: { '2027-01-01': 'R12' } }], { minWeekendShifts: 0 }, '2027-01');
+    const ev = run(k, rowsOf(k, [r12(0, 1, 2, 8, 9)]));
+    expect(ev.persons[0].mustUnits).toBe(1);
+    expect(ev.score).toBe(HARD);
+  });
+});
+
+describe('M12 in detail', () => {
+  it('is broken by one weekend shift: WEEKEND_SHORT, no days, the count in the text', () => {
+    expect(found(c, 'M12', r12(5))).toEqual([{
+      rule: 'M12', severity: 'must', person: 0, days: [],
+      message: '1 víkendová směna (min. 2)', penalty: WEEKEND_SHORT,
+    }]);
+  });
+  it('asks WEEKEND_SHORT for each shift short: none at all is two short', () => {
+    expect(found(c, 'M12')).toEqual([{
+      rule: 'M12', severity: 'must', person: 0, days: [],
+      message: '0 víkendových směn (min. 2)', penalty: 2 * WEEKEND_SHORT,
+    }]);
+  });
+  it('is met by two weekend shifts, R12 or N12, on any weekends, and by more', () => {
+    expect(found(c, 'M12', r12(5, 6))).toEqual([]);
+    expect(found(c, 'M12', r12(5, 19))).toEqual([]);
+    expect(found(c, 'M12', strip({ 5: 'N12', 12: 'R12' }))).toEqual([]);
+    expect(found(c, 'M12', r12(5, 6, 12, 13))).toEqual([]);
+  });
+  it('takes a weekday shift for no weekend shift', () => {
+    expect(found(c, 'M12', 'R1 R1 R1 R1 R1')).toHaveLength(1);
+  });
+  it('counts a holiday on a weekday as a weekend shift, unless it is claimed', () => {
+    // Fri 1 Jan is a public holiday: with Sat 2 Jan it makes two
+    expect(found(plainJan, 'M12', r12(0, 1))).toEqual([]);
+    // pinned, it is claimed and counts toward nothing: one weekend shift is left
+    expect(found(claimedJan, 'M12', r12(0, 1))).toEqual([{
+      rule: 'M12', severity: 'must', person: 0, days: [],
+      message: '1 víkendová směna (min. 2)', penalty: WEEKEND_SHORT,
+    }]);
+    // and a claimed shift on top of two weekend shifts changes nothing
+    expect(found(claimedJan, 'M12', r12(0, 1, 2))).toEqual([]);
+  });
+  it('follows the minimum in the settings and quotes it', () => {
+    const three = ctxFor('2027-02', 1, { minWeekendShifts: 3 });
+    expect(found(three, 'M12', r12(5, 6))).toEqual([{
+      rule: 'M12', severity: 'must', person: 0, days: [],
+      message: '2 víkendové směny (min. 3)', penalty: WEEKEND_SHORT,
+    }]);
+    expect(found(ctxFor('2027-02', 1, { minWeekendShifts: 0 }), 'M12')).toEqual([]);
+  });
+  it('is asked of everyone, also of someone who joins in the month', () => {
+    const joiner = ctxFor('2027-02', [{ activeFrom: '2027-02-15' }]);
+    expect(found(joiner, 'M12').map((f) => f.penalty)).toEqual([2 * WEEKEND_SHORT]);
+  });
+  it('is judged for each person on their own', () => {
+    const two = ctxFor('2027-02', 2);
+    expect(found(two, 'M12', r12(5, 6)).map((f) => [f.person, f.penalty]))
+      .toEqual([[1, 2 * WEEKEND_SHORT]]);
+  });
+  it('counts the shifts of the month only', () => {
+    const withTail = run(c, rowsOf(c, [r12(5)], ['R12 R12 R12 R12 R12 R12 R12']));
+    expect(rules(withTail, 'M12')).toHaveLength(1);
+  });
+  it('is one must unit, however many shifts are short', () => {
+    const k = bare([{}]);
+    const none = run(k, rowsOf(k, []));
+    expect([none.persons[0].mustUnits, none.mustUnits, none.score])
+      .toEqual([1, 1, 2 * WEEKEND_SHORT]);
+    const one = run(k, rowsOf(k, [r12(5)]));
+    expect([one.persons[0].mustUnits, one.mustUnits, one.score]).toEqual([1, 1, WEEKEND_SHORT]);
+    const met = run(k, rowsOf(k, [r12(5, 6)]));
+    expect([met.persons[0].mustUnits, met.mustUnits, met.score]).toEqual([0, 0, 0]);
+  });
+});
+
+describe("a person's own maximum of 12-hour shifts, in detail", () => {
+  it('lets the person have more, and the others not', () => {
+    const k = ctxFor('2027-02', [{ maxTwelve: 4 }, {}]);
+    const ev = run(k, rowsOf(k, [r12(5, 6, 12, 13), r12(5, 6, 12, 13)]));
+    expect(rules(ev, 'M5').map((f) => [f.person, f.message])).toEqual([
+      [1, '4 dvanáctihodinové směny (max. 3)'],
+    ]);
+  });
+  it('lets the person have fewer, and quotes it', () => {
+    const k = ctxFor('2027-02', [{ maxTwelve: 1 }]);
+    expect(found(k, 'M5', r12(5, 6))).toEqual([{
+      rule: 'M5', severity: 'must', person: 0, days: [k.first + 5, k.first + 6],
+      message: '2 dvanáctihodinové směny (max. 1)', penalty: HARD,
+    }]);
+  });
+  it('is the maximum, whatever the general one is', () => {
+    const k = ctxFor('2027-02', [{ maxTwelve: 2 }], { maxTwelvePerMonth: 5 });
+    expect(found(k, 'M5', r12(5, 6, 12))[0].message).toBe('3 dvanáctihodinové směny (max. 2)');
+  });
+  it('leaves the claimed holiday shifts out of its count too', () => {
+    const k = ctxFor('2027-01', [{ maxTwelve: 2, pinned: { '2027-01-01': 'R12' } }]);
+    expect(found(k, 'M5', r12(0, 1, 2))).toEqual([]);
+    expect(found(k, 'M5', r12(0, 1, 2, 8))[0].message).toBe('3 dvanáctihodinové směny (max. 2)');
+  });
+  it('is the general maximum when the person has none', () => {
+    const k = ctxFor('2027-02', [{ maxTwelve: null }], { maxTwelvePerMonth: 2 });
+    expect(found(k, 'M5', r12(5, 6, 12))[0].message).toBe('3 dvanáctihodinové směny (max. 2)');
+  });
+});
+
+describe('M13 in detail', () => {
+  it('is broken by a night over the maximum: HARD, the nights as days, the count in text', () => {
+    expect(overNights(2, 'N N N')).toEqual([{
+      rule: 'M13', severity: 'must', person: 0, days: [c.first, c.first + 1, c.first + 2],
+      message: '3 noční (max. 2)', penalty: HARD,
+    }]);
+  });
+  it('holds for a maximum of 0: no night at all', () => {
+    expect(overNights(0, 'N')).toEqual([{
+      rule: 'M13', severity: 'must', person: 0, days: [c.first],
+      message: '1 noční (max. 0)', penalty: HARD,
+    }]);
+    expect(overNights(0, 'R1 R2 O20 O')).toEqual([]);
+  });
+  it('is no limit for null', () => {
+    expect(overNights(null, Array(10).fill('N').join(' '))).toEqual([]);
+  });
+  it('allows exactly the maximum', () => {
+    expect(overNights(3, 'N N N')).toEqual([]);
+  });
+  it('counts N and N12 alike', () => {
+    expect(overNights(1, strip({ 0: 'N', 5: 'N12' })).map((f) => [f.days, f.message])).toEqual([
+      [[c.first, c.first + 5], '2 noční (max. 1)'],
+    ]);
+  });
+  it('is HARD for each night over the maximum, and a must unit for each', () => {
+    const k = bare([{ maxNights: 1 }], { minWeekendShifts: 0 });
+    const ev = run(k, rowsOf(k, ['N N N N']));
+    expect(rules(ev, 'M13')[0].penalty).toBe(3 * HARD);
+    expect(ev.persons[0].mustUnits).toBe(3);
+    expect(ev.score).toBe(3 * HARD);
+  });
+  it('counts the nights of the month only', () => {
+    expect(overNights(1, 'N', '- - - - N N N')).toEqual([]);
+  });
+  it('puts the count in the Czech form: 1, 2 to 4, and 5 or more', () => {
+    const message = (count: number) => overNights(0, Array(count).fill('N').join(' '))[0].message;
+    expect([1, 2, 3, 4, 5].map(message)).toEqual([
+      '1 noční (max. 0)', '2 noční (max. 0)', '3 noční (max. 0)', '4 noční (max. 0)',
+      '5 nočních (max. 0)',
+    ]);
+  });
+  it('is a must of its own, besides the strong wish of a person who never takes nights', () => {
+    const k = ctxFor('2027-02', [{ prefs: { nights: 'never' }, maxNights: 0 }]);
+    const ev = run(k, rowsOf(k, ['N']));
+    expect(rules(ev, 'M13')).toHaveLength(1);
+    expect(rules(ev, 'S1')).toHaveLength(1);
   });
 });

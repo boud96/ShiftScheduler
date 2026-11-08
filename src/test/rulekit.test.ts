@@ -32,6 +32,23 @@ describe('ctxFor', () => {
     expect(c.people[2].prefs.nights).toBe('normal');
     expect(c.people[2].history).toEqual({ twelve: 0, nights: 0, holidayTwelve: 0, festive: 0 });
   });
+  it('resolves the limits of a patch, and takes none to be the general ones', () => {
+    const c = ctxFor('2027-02', [{ maxTwelve: 4, maxNights: 0 }, { maxTwelve: null }, {}]);
+    expect(c.people.map((p) => p.maxTwelve)).toEqual([4, 3, 3]);
+    expect(c.people.map((p) => p.maxNights)).toEqual([0, null, null]);
+    const own = ctxFor('2027-02', [{ maxTwelve: 1 }], { maxTwelvePerMonth: 5 });
+    expect(own.people[0].maxTwelve).toBe(1);
+    expect(ctxFor('2027-02', [{}], { maxTwelvePerMonth: 5 }).people[0].maxTwelve).toBe(5);
+  });
+  it('pins the shifts of a patch, and a pinned 12-hour shift on a holiday is claimed', () => {
+    // Fri 1 Jan 2027 is a public holiday, Sat 2 Jan is not
+    const c = ctxFor('2027-01', [
+      { pinned: { '2027-01-01': 'R12', '2027-01-02': 'R12', '2027-01-04': 'R1' } },
+      {},
+    ]);
+    expect(Array.from(c.people[0].claimed.subarray(c.first, c.first + 5))).toEqual([1, 0, 0, 0, 0]);
+    expect(c.people[1].claimed.every((x) => x === 0)).toBe(true);
+  });
   it('stores the code of a patch on day 1 of the next month, also past the end of a year', () => {
     const c = ctxFor('2027-02', [{ nextDay: 'x' }, {}, { nextDay: 'R1' }]);
     expect(c.people.map((p) => p.nextDay)).toEqual([Code.X, Code.EMPTY, Code.R1]);
@@ -107,13 +124,19 @@ describe('run, rules, units and noWishes', () => {
     const ev = run(c, rowsOf(c, ['O R1']));
     expect(rules(ev, 'M2').map((f) => f.rule)).toEqual(['M2']);
     expect(rules(ev, 'M6')).toHaveLength(1);
-    expect(rules(ev, 'M7')).toEqual([]);
+    expect(rules(ev, 'M13')).toEqual([]);
   });
   it('units counts the findings of a must, whatever their penalty', () => {
     const ev = run(c, rowsOf(c, ['- - - - - R12 R12 | - - - - - R12 R12 | - - - - - R12']));
     expect(rules(ev, 'M5')[0].penalty).toBe(2e9); // two shifts over the maximum, in one finding
     expect(units(ev, c, 'M5')).toBe(1);
-    expect(units(ev, c, 'M7')).toBe(0);
+    expect(units(ev, c, 'M13')).toBe(0);
+  });
+  it('units counts the findings of the strong wish S1 too, not penalties over a weight', () => {
+    const never = ctxFor('2027-02', [{ prefs: { nights: 'never' } }]);
+    const ev = run(never, rowsOf(never, ['N N - - - N12']));
+    expect(units(ev, never, 'S1')).toBe(3);
+    expect(units(run(c, rowsOf(c, ['N'])), c, 'S1')).toBe(0);
   });
   it('units divides the penalties of a wish by its weight', () => {
     const ev = { ...run(c, rowsOf(c, [])), findings: [wish(30), wish(15)] };

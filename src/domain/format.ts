@@ -24,6 +24,22 @@ export function twelveShifts(n: number): string {
   return `${n} ${form}`;
 }
 
+/**
+ * A number of weekend shifts with the Czech plural: 1 víkendová směna, 2-4 víkendové směny, 0 and
+ * 5 or more víkendových směn.
+ */
+export function weekendShifts(n: number): string {
+  const form =
+    n === 1 ? 'víkendová směna' : n >= 2 && n <= 4 ? 'víkendové směny' : 'víkendových směn';
+  return `${n} ${form}`;
+}
+
+/** A number of nights with the Czech plural: 1 noční, 2-4 noční, 0 and 5 or more nočních. */
+export function nightShifts(n: number): string {
+  const form = n >= 1 && n <= 4 ? 'noční' : 'nočních';
+  return `${n} ${form}`;
+}
+
 /** A date `YYYY-MM-DD` as the Czech `D. M.`: `2027-01-04` gives `4. 1.`. */
 export function shortDate(date: string): string {
   return `${Number(date.slice(8, 10))}. ${Number(date.slice(5, 7))}.`;

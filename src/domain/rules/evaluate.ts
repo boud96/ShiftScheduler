@@ -9,7 +9,10 @@ export interface MonthEval {
   score: number;
   /** Units of the musts of every person and every day. */
   mustUnits: number;
-  /** Empty unless explained. Musts first, then by first day; findings without a day come last. */
+  /**
+   * Empty unless explained. Musts first, then strong wishes, then the other wishes; each by first
+   * day, and findings without a day last.
+   */
   findings: Finding[];
   /** One per person of `ctx.people`. */
   persons: PersonStats[];
@@ -21,8 +24,14 @@ function firstDay(f: Finding): number {
   return f.days.length > 0 ? Math.min(...f.days) : Infinity;
 }
 
-function mustsFirstThenByDay(a: Finding, b: Finding): number {
-  if (a.severity !== b.severity) return a.severity === 'must' ? -1 : 1;
+/** 0 for a must, 1 for a strong wish, 2 for any other wish: the order of the checks list. */
+function tier(f: Finding): number {
+  return f.severity === 'must' ? 0 : f.strong === true ? 1 : 2;
+}
+
+function byTierThenDay(a: Finding, b: Finding): number {
+  const byTier = tier(a) - tier(b);
+  if (byTier !== 0) return byTier;
   const x = firstDay(a);
   const y = firstDay(b);
   return x < y ? -1 : x > y ? 1 : 0;
@@ -58,6 +67,6 @@ export function evaluateMonth(ctx: MonthContext, rows: Uint8Array[], explain = f
   }
   score += evaluateGlobal(ctx, persons, days, sink);
 
-  findings.sort(mustsFirstThenByDay);
+  findings.sort(byTierThenDay);
   return { score, mustUnits, findings, persons, days };
 }

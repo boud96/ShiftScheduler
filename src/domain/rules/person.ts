@@ -9,15 +9,19 @@ import type { PersonStats, Sink } from './types';
 import { weekendWishes } from './weekendWishes';
 
 /**
- * Counts the month days of `row` into `stats`. The previous month's tail is not counted. A shift
- * on a day outside the person's time in the team counts like any other: M3 is what reports it.
+ * Counts the month days of `row`, the cells of person `p`, into `stats`. The previous month's tail
+ * is not counted. A shift on a day outside the person's time in the team counts like any other: M3
+ * is what reports it. A 12-hour shift on a day that `EnginePerson.claimed` marks is counted in
+ * `claimedTwelve` as well as in `twelve`.
  */
-function countMonth(ctx: MonthContext, row: Uint8Array, stats: PersonStats): void {
+function countMonth(ctx: MonthContext, p: number, row: Uint8Array, stats: PersonStats): void {
   const { days, first } = ctx;
   const { shifts, absenceHours } = ctx.settings;
   const { perShift } = stats;
+  const { claimed } = ctx.people[p];
   let hours = 0;
   let twelve = 0;
+  let claimedTwelve = 0;
   let nights = 0;
   let holidayTwelve = 0;
   let festive = 0;
@@ -31,6 +35,7 @@ function countMonth(ctx: MonthContext, row: Uint8Array, stats: PersonStats): voi
       if (isTwelveShift(code)) {
         twelve++;
         if (days[i].holiday) holidayTwelve++;
+        if (claimed[i] === 1) claimedTwelve++;
       } else {
         perShift[code - Code.R1]++;
       }
@@ -41,6 +46,7 @@ function countMonth(ctx: MonthContext, row: Uint8Array, stats: PersonStats): voi
 
   stats.hours = hours;
   stats.twelve = twelve;
+  stats.claimedTwelve = claimedTwelve;
   stats.nights = nights;
   stats.holidayTwelve = holidayTwelve;
   stats.festive = festive;
@@ -60,13 +66,14 @@ export function evaluatePerson(
   const stats: PersonStats = {
     hours: 0,
     twelve: 0,
+    claimedTwelve: 0,
     nights: 0,
     holidayTwelve: 0,
     festive: 0,
     perShift: [0, 0, 0, 0, 0],
     mustUnits: 0,
   };
-  countMonth(ctx, row, stats);
+  countMonth(ctx, p, row, stats);
   const score =
     personMusts(ctx, p, row, stats, sink) +
     runMusts(ctx, p, row, stats, sink) +

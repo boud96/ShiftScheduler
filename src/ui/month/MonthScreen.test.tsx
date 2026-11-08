@@ -59,12 +59,13 @@ function plan(count = 8): AppData {
 
 /**
  * A plan in which nothing is wrong and nothing is wished for, until a test makes it so: no one is
- * below FPD, no shift is required, and every wish is switched off.
+ * below FPD, no shift is required (nor any weekend shift), and every wish is switched off.
  */
 function calm(count = 8): AppData {
   const data = plan(count);
   const { settings } = data;
   settings.fpdHoursPerWeekday = 0;
+  settings.minWeekendShifts = 0;
   for (const range of Object.values(settings.coverage)) {
     range.min = 0;
     range.max = null;

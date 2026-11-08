@@ -484,6 +484,7 @@ describe('when a run ends', () => {
     it('is 0 when Kontrola lists no broken must', async () => {
       const data = january();
       data.settings.fpdHoursPerWeekday = 0; // nobody is short of hours
+      data.settings.minWeekendShifts = 0; // nor of weekend shifts
       for (const range of Object.values(data.settings.coverage)) {
         range.min = 0;
         range.max = null;

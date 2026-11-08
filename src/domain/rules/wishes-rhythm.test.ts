@@ -472,10 +472,10 @@ describe('W4d in detail', () => {
       { message: '2× noční, i když je bere jen v nouzi', days: [26, 27], units: 8 },
     ]);
   });
-  it('asks nothing for a night of someone who never takes them: M7 has it', () => {
+  it('asks nothing for a night of someone who never takes them: S1 has it', () => {
     const x = nights('never');
     expect(u('N N N', 'W4d', x)).toBe(0);
-    expect(rules(run(x, rowsOf(x, ['N N N'])), 'M7')).toHaveLength(3);
+    expect(rules(run(x, rowsOf(x, ['N N N'])), 'S1')).toHaveLength(3);
   });
   it('reports the nights of someone who takes them as usual in a quiet finding', () => {
     // The units of 'normal' are in the findings, because that is how the score is explained;
@@ -645,10 +645,11 @@ describe('the wishes on rows of any kind', () => {
 });
 
 describe('the findings of a month', () => {
-  // Four people and a month that breaks all eight musts and all of these wishes: coverage (M1),
-  // O -> R12 (M2), shifts before D joins (M3), nights before a request or an absence (M4), 8
-  // twelve-hour shifts for B (M5), hours below the FPD (M6), nights for D (M7), R12 on weekdays and
-  // N on a Sunday (M8). A takes nights as usual, so the month holds a quiet finding.
+  // Four people and a month that breaks seven musts, the strong wish S1 and all of these wishes:
+  // coverage (M1), O -> R12 (M2), shifts before D joins (M3), nights before a request or an
+  // absence (M4), 8 twelve-hour shifts for B (M5), hours below the FPD (M6), R12 on weekdays and N
+  // on a Sunday (M8), and nights for D (S1). A takes nights as usual, so the month holds a quiet
+  // finding.
   const team: PersonPatch[] = [
     { prefs: { nights: 'normal' } },
     { prefs: { nights: 'ifNeeded', afterNights: ['R1'] } },
@@ -677,7 +678,7 @@ describe('the findings of a month', () => {
     expect(ev.findings.every((f) => f.message !== '')).toBe(true);
     expect(ev.findings.some((f) => f.quiet === true)).toBe(true);
     const seen = new Set(ev.findings.map((f) => f.rule));
-    for (const id of ['M1', 'M2', 'M3', 'M4', 'M5', 'M6', 'M7', 'M8', ...RHYTHM]) {
+    for (const id of ['M1', 'M2', 'M3', 'M4', 'M5', 'M6', 'S1', 'M8', ...RHYTHM]) {
       expect(seen).toContain(id); // the month really breaks every rule of this file and Task 4
     }
   });

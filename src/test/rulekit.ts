@@ -23,6 +23,16 @@ export interface PersonPatch {
   activeFrom?: ISODate | null;
   activeTo?: ISODate | null;
   startingCounts?: Partial<FairnessCounts>;
+  /** The person's own maximum of 12-hour shifts a month; absent or null is the general maximum. */
+  maxTwelve?: number | null;
+  /** The person's own maximum of nights a month; absent or null means no limit. */
+  maxNights?: number | null;
+  /**
+   * Shifts stored and pinned for the person, by date. A pinned R12 or N12 on a public holiday is a
+   * claimed holiday shift (`EnginePerson.claimed`). They are no cells of the rows: write the same
+   * codes in the strips of `rowsOf`.
+   */
+  pinned?: Record<ISODate, CodeName>;
   /** The code stored for the person on day 1 of the month after the one asked for. */
   nextDay?: CodeName;
   /**
@@ -52,6 +62,11 @@ export function ctxFor(
     person.activeFrom = patch.activeFrom ?? null;
     person.activeTo = patch.activeTo ?? null;
     person.startingCounts = { ...person.startingCounts, ...patch.startingCounts };
+    person.maxTwelve = patch.maxTwelve ?? null;
+    person.maxNights = patch.maxNights ?? null;
+    for (const [date, code] of Object.entries(patch.pinned ?? {})) {
+      (data.cells[date] ??= {})[person.id] = { code, pinned: true };
+    }
     if (patch.nextDay !== undefined) {
       const after = `${addMonths(month, 1)}-01`;
       (data.cells[after] ??= {})[person.id] = { code: patch.nextDay };
@@ -126,13 +141,14 @@ export function rules(ev: MonthEval, id: RuleId): Finding[] {
 /**
  * How much of a rule there is in an evaluation. For a wish: its penalties divided by its weight in
  * `ctx`, so that the number does not depend on the level of the wish; a wish switched off (weight
- * 0) has no units. For a must (M1 to M8) it counts findings, not units: one M1 finding can stand
- * for several missing people (its penalty is GAP times the number missing), so a caller who wants
- * people sums penalty / GAP.
+ * 0) has no units. For a must (M1 to M13) and for the strong wish S1, whose penalty is a fixed tier
+ * and no wish's weight, it counts findings, not units: one M1 finding can stand for several
+ * missing people (its penalty is GAP times the number missing), so a caller who wants people sums
+ * penalty / GAP.
  */
 export function units(ev: MonthEval, ctx: MonthContext, id: RuleId): number {
   const found = rules(ev, id);
-  if (id.startsWith('M')) return found.length;
+  if (id.startsWith('M') || id === 'S1') return found.length;
   const weight = ctx.weights[id as WishId];
   return weight === 0 ? 0 : found.reduce((sum, f) => sum + f.penalty, 0) / weight;
 }

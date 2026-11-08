@@ -1,9 +1,22 @@
 import type { Level, WishId } from '../types';
 
-/** Score of one broken must (M2-M5, M7-M11) or one person too many on a shift (M1). */
+// The tiers of the score. Each outweighs everything below it, so that the generator settles the
+// rules in the order of the design (§3.8): a hard must is never traded for anything, a shift left
+// uncovered is traded only for a hard must, and so on down to the wishes. `weights.test.ts` holds
+// the inequalities that keep this order.
+
+/** Score of one broken hard must (M2-M5, M8-M11, M13) or one person too many on a shift (M1). */
 export const HARD = 1e9;
 /** Score of one missing person on a shift (M1). */
-export const GAP = 1e6;
+export const GAP = 1e7;
+/**
+ * Score of one night for someone who does not want nights (S1). Above the hours of the longest
+ * shift at BELOW_FPD (11.5 × 1e5), so that hours never buy such a night; below GAP, so that
+ * covering a night does.
+ */
+export const STRONG = 2e6;
+/** Score of each weekend shift below the minimum (M12). */
+export const WEEKEND_SHORT = 1e6;
 /** Score of one hour below the working-time fund (M6). */
 export const BELOW_FPD = 1e5;
 

@@ -30,6 +30,7 @@ describe('PersonStats', () => {
     expect(persons[0]).toEqual({
       hours: 3 * 11.5 + 5 * 7.5,
       twelve: 3,
+      claimedTwelve: 0, // nothing is pinned
       nights: 2, // N12 and N
       holidayTwelve: 1, // N12 on 1 Jan
       festive: 1, // 1 Jan
@@ -50,6 +51,16 @@ describe('PersonStats', () => {
       festive: 0,
     });
     expect(persons[0].perShift).toEqual([0, 0, 0, 0, 0]);
+  });
+  it('counts the claimed holiday shifts of the month, not those of the tail or empty cells', () => {
+    // Fri 25 Dec 2026 (in the tail) and Fri 1 Jan are holidays, and a shift is pinned on both
+    const k = ctxFor('2027-01', [{ pinned: { '2026-12-25': 'R12', '2027-01-01': 'N12' } }]);
+    expect(k.people[0].claimed[0]).toBe(1); // the context claims the tail day as well
+    expect(run(k, rowsOf(k, ['N12 R12'], ['R12'])).persons[0])
+      .toMatchObject({ twelve: 2, claimedTwelve: 1, holidayTwelve: 1 }); // Sat 2 Jan is no holiday
+    // the claim stands on the shift in the row: with 1 Jan empty there is nothing to count
+    expect(run(k, rowsOf(k, ['- R12'], ['R12'])).persons[0])
+      .toMatchObject({ twelve: 1, claimedTwelve: 0, holidayTwelve: 0 });
   });
   it('tells a holiday from a festive day', () => {
     // Fri 26 and Mon 29 Mar 2027 are Good Friday and Easter Monday: holidays, but not festive days
@@ -119,15 +130,21 @@ describe('evaluatePerson', () => {
   it('uses the preferences, the FPD and the active days of person p', () => {
     const t = ctxFor('2027-02', [{}, { prefs: { nights: 'never' } }, { activeFrom: '2027-02-15' }]);
     const row = rowsOf(t, ['N', 'N', 'N'])[0];
-    const mustsOf = (p: number) => {
+    const findingsOf = (p: number) => {
       const found: Finding[] = [];
       evaluatePerson(t, p, row, (f) => found.push(f));
-      return found.filter((f) => f.severity === 'must').map((f) => f.rule).sort();
+      return found;
     };
-    expect(mustsOf(0)).toEqual(['M6']);
-    expect(mustsOf(1)).toEqual(['M6', 'M7']);
-    expect(mustsOf(2)).toEqual(['M3', 'M6']);
-    expect(evaluatePerson(t, 2, row).stats.mustUnits).toBe(2);
+    const mustsOf = (p: number) =>
+      findingsOf(p).filter((f) => f.severity === 'must').map((f) => f.rule).sort();
+    // everyone is short of FPD (M6) and of the weekend minimum (M12) with a single night
+    expect(mustsOf(0)).toEqual(['M12', 'M6']);
+    expect(mustsOf(1)).toEqual(['M12', 'M6']);
+    expect(mustsOf(2)).toEqual(['M12', 'M3', 'M6']);
+    expect(evaluatePerson(t, 2, row).stats.mustUnits).toBe(3);
+    // a night of the person who never takes them is a strong wish, no must
+    expect(findingsOf(1).filter((f) => f.strong === true).map((f) => f.rule)).toEqual(['S1']);
+    expect(findingsOf(0).filter((f) => f.rule === 'S1')).toEqual([]);
   });
   it('measures person p against the FPD of person p', () => {
     const t = ctxFor('2027-02', [{}, { activeFrom: '2027-02-15' }]); // FPD 150 h and 75 h
@@ -143,13 +160,14 @@ describe('evaluatePerson', () => {
 });
 
 describe('the sink', () => {
-  const row = rowsOf(c, ['O R1 R12'])[0]; // M2 (O -> R1), M8 (R12 on a Wednesday) and M6
+  // M2 (O -> R1), M8 (R12 on a Wednesday), M6 and, with one weekend shift too few, M12
+  const row = rowsOf(c, ['O R1 R12'])[0];
   it('gets every finding of a person, and changes neither the score nor the stats', () => {
     const seen: Finding[] = [];
     const withSink = evaluatePerson(c, 0, row, (f) => seen.push(f));
     expect(withSink).toEqual(evaluatePerson(c, 0, row));
     const musts = seen.filter((f) => f.severity === 'must');
-    expect(musts.map((f) => f.rule).sort()).toEqual(['M2', 'M6', 'M8']);
+    expect(musts.map((f) => f.rule).sort()).toEqual(['M12', 'M2', 'M6', 'M8']);
   });
   it('gets every finding of a day, and changes nothing else', () => {
     const t = ctxFor('2027-02', 2);
@@ -211,21 +229,24 @@ describe('evaluateMonth', () => {
     const musts = ev.findings.filter((f) => f.severity === 'must');
     const keys = musts.map(first);
     expect(keys).toEqual([...keys].sort((a, b) => a - b));
-    expect(musts.slice(-2).map((f) => [f.rule, f.person])).toEqual([['M6', 0], ['M6', 1]]);
+    // (the second person has no weekend shift either: M12, after M6 in the person's own order)
+    expect(musts.slice(-3).map((f) => [f.rule, f.person]))
+      .toEqual([['M6', 0], ['M6', 1], ['M12', 1]]);
   });
   it('scores what it lists: with the wishes off, the score is the sum of the penalties', () => {
     // person 1 joins on Thu 4 Feb and never works nights
     const joiner = { activeFrom: '2027-02-04', prefs: { nights: 'never' as const } };
     const t = ctxFor('2027-02', [joiner, {}, {}], { wishLevels: noWishes() });
     const ev = run(t, rowsOf(t, [
-      'R1 N - N', // M3 on Mon and Tue, M7 on both nights
+      'R1 N - N', // M3 on Mon and Tue, S1 on both nights, and no weekend shift: M12
       `${five} | - - R12 R12`, // M5 and, on Tue and Wed, M8
       'O R1 R12 - - - N12 N | N DOV', // M2, M8 on Wed, M4
     ]));
     const musts = ev.findings.filter((f) => f.severity === 'must');
     expect(new Set(musts.map((f) => f.rule))).toEqual(
-      new Set(['M1', 'M2', 'M3', 'M4', 'M5', 'M6', 'M7', 'M8']),
+      new Set(['M1', 'M2', 'M3', 'M4', 'M5', 'M6', 'M8', 'M12']),
     );
+    expect(ev.findings.filter((f) => f.rule === 'S1')).toHaveLength(2);
     expect(ev.score).toBeCloseTo(ev.findings.reduce((sum, f) => sum + f.penalty, 0), 3);
   });
 });

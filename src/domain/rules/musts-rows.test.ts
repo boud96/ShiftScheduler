@@ -90,6 +90,7 @@ const jan = (d: number) => j.first + d - 1;
 const fresh = (): PersonStats => ({
   hours: 0,
   twelve: 0,
+  claimedTwelve: 0,
   nights: 0,
   holidayTwelve: 0,
   festive: 0,

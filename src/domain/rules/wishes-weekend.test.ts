@@ -151,6 +151,21 @@ describe('W5a in detail', () => {
       penalty: c.weights.W5a,
     }]);
   });
+  it('leaves a claimed holiday shift out: it is extra, on top of the target', () => {
+    // Fri 1 Jan 2027 is a public holiday, so the R12 pinned on it is claimed (see EnginePerson)
+    const jan = ctxFor('2027-01', [{ pinned: { '2027-01-01': 'R12' } }]);
+    // the claimed shift and two weekend shifts: the two that count are the target
+    expect(unitsOf('W5a', at({ 0: 'R12', 1: 'R12', 2: 'R12' }), jan)).toBe(0);
+    // the claimed shift alone leaves none to count: the whole target away
+    expect(unitsOf('W5a', 'R12', jan)).toBe(4);
+    // one counts, and the finding says so and names that shift alone
+    expect(listed(found('W5a', at({ 0: 'R12', 1: 'R12' }), [], jan), jan)).toEqual([
+      { message: '1 dvanáctihodinová směna (cíl 2)', days: [1], units: 1 },
+    ]);
+    expect(listed(found('W5a', 'R12', [], jan), jan)).toEqual([
+      { message: '0 dvanáctihodinových směn (cíl 2)', days: [], units: 4 },
+    ]);
+  });
 });
 
 describe('W5b in detail', () => {

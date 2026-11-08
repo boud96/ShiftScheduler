@@ -60,8 +60,8 @@ export function cellsWith(row: Uint8Array, from: number, to: number, code: numbe
   return found;
 }
 
-/** The night shifts of the month. */
-function monthNights(ctx: MonthContext, row: Uint8Array): number[] {
+/** The night shifts of the month, for the cells W4 (and M13) point at. */
+export function monthNights(ctx: MonthContext, row: Uint8Array): number[] {
   const found: number[] = [];
   for (let i = ctx.first; i < ctx.days.length; i++) if (isNight(row[i])) found.push(i);
   return found;
@@ -358,7 +358,7 @@ function nightRuns(
 
 /**
  * W4d: a night costs 0 for someone who takes them gladly (`extra`), 1 for `normal` and 4 for
- * `ifNeeded`. Someone who never takes them has M7 instead.
+ * `ifNeeded`. Someone who never takes them has S1 instead.
  *
  * Only a night of an `ifNeeded` person is something to tell the team lead. The 1 per night of a
  * `normal` person is still reported, so that the findings add up to the score, but as a `quiet`

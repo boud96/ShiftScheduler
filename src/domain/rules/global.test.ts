@@ -173,6 +173,28 @@ describe('W7 in detail', () => {
       shown(0, 'víc směn o svátcích než ostatní', 1),
     ]);
   });
+  it('leaves a claimed holiday shift out of the 12-hour count, not out of the holiday one', () => {
+    // Fri 1 Jan 2027 is a public holiday, and the first person has an R12 pinned on it: claimed.
+    // They work it (day 0) and Sat 2 and Sat 9 Jan (days 1 and 8); the second person works Sun 3,
+    // Sun 10 and Sat 16 Jan (days 2, 9 and 15). The festive days are left out, so that 1 Jan is no
+    // count of its own here.
+    const c = ctxFor('2027-01', [{ pinned: { '2027-01-01': 'R12' } }, {}], { festiveDays: [] });
+    const strips = [at({ 0: 'R12', 1: 'R12', 8: 'R12' }), at({ 2: 'R12', 9: 'R12', 15: 'R12' })];
+    // 12-hour shifts that count: 2 and 3, the mean is 2.5 and each is half a shift away. Holiday
+    // shifts, claimed or not: 1 and 0, half a shift away as well.
+    expect(listed(found(c, 'W7', strips), c)).toEqual([
+      quiet(0, 'méně dvanáctihodinových směn než ostatní', 0.25),
+      quiet(1, 'méně směn o svátcích než ostatní', 0.25),
+      quiet(1, 'víc dvanáctihodinových směn než ostatní', 0.25),
+      quiet(0, 'víc směn o svátcích než ostatní', 0.25),
+    ]);
+    // the same rows with no claim: 3 and 3 shifts, level, and only the holiday count is off
+    const plain = ctxFor('2027-01', 2, { festiveDays: [] });
+    expect(listed(found(plain, 'W7', strips), plain)).toEqual([
+      quiet(1, 'méně směn o svátcích než ostatní', 0.25),
+      quiet(0, 'víc směn o svátcích než ostatní', 0.25),
+    ]);
+  });
   it('counts a shift of any kind on a festive day as a count of its own', () => {
     const c = ctxFor('2027-02', 2, { festiveDays: ['02-02', '02-03'] });
     expect(listed(found(c, 'W7', [at({ 1: 'R1', 2: 'R1' })]), c)).toEqual([
@@ -448,7 +470,7 @@ describe('the global wishes W7 to W9 together', () => {
     const ev = run(ctx, rowsOf(ctx, strips));
     const sum = ev.findings.reduce((total, f) => total + f.penalty, 0);
     expect(ev.score).toBeGreaterThan(0);
-    // The two sums add the same penalties in another order, and the musts are 1e9 or 1e6 each:
+    // The two sums add the same penalties in another order, and the musts are 1e9 or 1e7 each:
     // hence a relative tolerance. A penalty that lacks a finding would be far above it.
     expect(close(sum, ev.score)).toBe(true);
   });
@@ -519,6 +541,7 @@ describe('the global wishes W7 to W9 together', () => {
     const stats = (twelve: number): PersonStats => ({
       hours: 0,
       twelve,
+      claimedTwelve: 0,
       nights: 0,
       holidayTwelve: 0,
       festive: 0,
@@ -558,13 +581,16 @@ const squares = (values: number[]) => offsets(values).reduce((sum, d) => sum + d
 const among = (ctx: MonthContext, kind: keyof FairnessCounts) =>
   ctx.people.flatMap((person, p) =>
     kind !== 'nights' || person.prefs.nights === 'ifNeeded' ? [p] : []);
-/** The count of person `p`: the history and the month. */
+/** The count of person `p`: the history and the month, a claimed shift not a 12-hour one. */
 const totalOf = (
   ctx: MonthContext,
   persons: PersonStats[],
   kind: keyof FairnessCounts,
   p: number,
-) => ctx.people[p].history[kind] + persons[p][kind];
+) =>
+  ctx.people[p].history[kind] +
+  persons[p][kind] -
+  (kind === 'twelve' ? persons[p].claimedTwelve : 0);
 /** Who W8 compares for a shift: those who rate it 2 or lower. */
 const dislike = (ctx: MonthContext, name: WeekdayShift) =>
   ctx.people.flatMap((person, p) => {
@@ -596,6 +622,8 @@ describe('the global wishes on rows of any kind', () => {
     {
       prefs: { nights: 'ifNeeded', ratings: { O: 1, R1: 2 } },
       startingCounts: { twelve: 2, nights: 3, holidayTwelve: 1, festive: 0 },
+      // a claimed holiday shift, whenever the row holds a 12-hour shift on 1 Jan 2027
+      pinned: { '2027-01-01': 'R12' },
     },
     { prefs: { nights: 'ifNeeded', ratings: { O: 2, N: 1 } }, startingCounts: { nights: 1 } },
     { prefs: { nights: 'normal', ratings: { O: 1, R1: 1, R2: 2 } } },

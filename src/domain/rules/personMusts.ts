@@ -9,10 +9,11 @@ import {
   isWeekdayShift,
 } from '../codes';
 import type { MonthContext } from '../context';
-import { fmtH, shortDate, twelveShifts } from '../format';
+import { fmtH, nightShifts, shortDate, twelveShifts, weekendShifts } from '../format';
 import type { Settings, ShiftName } from '../types';
+import { monthNights } from './personWishes';
 import type { MustId, PersonStats, Sink } from './types';
-import { BELOW_FPD, HARD } from './weights';
+import { BELOW_FPD, HARD, STRONG, WEEKEND_SHORT } from './weights';
 
 const MINUTES_PER_DAY = 1440;
 /** A shortfall this small (in hours) is rounding noise in the sum of the hours, not a shortfall. */
@@ -37,19 +38,38 @@ function report(
   sink({ rule, severity: 'must', person, days, message, penalty });
 }
 
-/** The 12-hour shifts of the month, for the cells M5 (and W5a) point at. */
-export function twelveDays(ctx: MonthContext, row: Uint8Array): number[] {
+/** Hands a finding of the strong wish S1 to the sink. Call it only when there is a sink. */
+function reportStrong(
+  sink: Sink,
+  person: number,
+  days: number[],
+  message: string,
+  penalty: number,
+): void {
+  sink({ rule: 'S1', severity: 'wish', person, days, message, penalty, strong: true });
+}
+
+/**
+ * The 12-hour shifts of the month that count, for the cells M5 (and W5a) point at: the shifts of
+ * person `p` in `row`, but not the claimed holiday shifts, which are extra.
+ */
+export function twelveDays(ctx: MonthContext, p: number, row: Uint8Array): number[] {
+  const { claimed } = ctx.people[p];
   const found: number[] = [];
   for (let i = ctx.first; i < ctx.days.length; i++) {
-    if (isTwelveShift(row[i])) found.push(i);
+    if (isTwelveShift(row[i]) && claimed[i] === 0) found.push(i);
   }
   return found;
 }
 
 /**
- * Rules M2 to M8 for person `p`, whose month `row` has been counted into `stats` already (M5 and M6
- * read `twelve` and `hours`). Adds the person's must units to `stats.mustUnits` and returns their
- * score.
+ * Rules M2 to M6, M8, M12 and M13, and the strong wish S1, for person `p`, whose month `row` has
+ * been counted into `stats` already (M5, M6, M12 and M13 read `twelve`, `claimedTwelve`, `hours`
+ * and `nights`). Adds the person's must units to `stats.mustUnits` and returns their score. S1
+ * adds its penalty to the score, but no must unit.
+ *
+ * A claimed holiday shift is extra: M5 and M12 count the 12-hour shifts of the month without them
+ * (`twelve - claimedTwelve`). M5 follows the person's own maximum (`EnginePerson.maxTwelve`).
  *
  * Rules that look at two days read the last tail day for day 1, but only a finding that touches a
  * day of the month counts. They read the day after the month too, for the pair that its last day
@@ -86,12 +106,12 @@ export function personMusts(
         }
       }
 
-      // M7: no night shift for someone who never works nights.
+      // S1: a night shift for someone who never works nights is a strong wish, not a must: it
+      // costs STRONG and adds no must unit.
       if (neverNights && isNight(b)) {
-        score += HARD;
-        units++;
+        score += STRONG;
         if (sink !== undefined) {
-          report(sink, 'M7', p, [i], 'noční směna, ale noční nechce', HARD);
+          reportStrong(sink, p, [i], 'noční směna, ale noční nechce', STRONG);
         }
       }
 
@@ -164,15 +184,17 @@ export function personMusts(
     }
   }
 
-  // M5: at most `maxTwelvePerMonth` 12-hour shifts, HARD for each one over.
-  const maxTwelve = settings.maxTwelvePerMonth;
-  const excess = stats.twelve - maxTwelve;
+  // M5: at most `maxTwelve` 12-hour shifts, HARD for each one over. A claimed holiday shift is
+  // extra and counts toward nothing, so `counted` is also what M12 reads.
+  const counted = stats.twelve - stats.claimedTwelve;
+  const { maxTwelve } = person;
+  const excess = counted - maxTwelve;
   if (excess > 0) {
     score += HARD * excess;
     units += excess;
     if (sink !== undefined) {
-      const message = `${twelveShifts(stats.twelve)} (max. ${maxTwelve})`;
-      report(sink, 'M5', p, twelveDays(ctx, row), message, HARD * excess);
+      const message = `${twelveShifts(counted)} (max. ${maxTwelve})`;
+      report(sink, 'M5', p, twelveDays(ctx, p, row), message, HARD * excess);
     }
   }
 
@@ -184,6 +206,31 @@ export function personMusts(
     if (sink !== undefined) {
       const had = `${fmtH(stats.hours)} h z ${fmtH(person.fpd)} h`;
       report(sink, 'M6', p, [], `${had}: chybí ${fmtH(short)} h do FPD`, BELOW_FPD * short);
+    }
+  }
+
+  // M12: at least `minWeekendShifts` weekend shifts, WEEKEND_SHORT for each one short, and one
+  // unit however many are short. The generator may leave it short when it must, like M6.
+  const minWeekend = settings.minWeekendShifts;
+  const weekendShort = minWeekend - counted;
+  if (weekendShort > 0) {
+    score += WEEKEND_SHORT * weekendShort;
+    units++;
+    if (sink !== undefined) {
+      const message = `${weekendShifts(counted)} (min. ${minWeekend})`;
+      report(sink, 'M12', p, [], message, WEEKEND_SHORT * weekendShort);
+    }
+  }
+
+  // M13: at most `maxNights` nights, if the person has a limit, HARD for each one over.
+  const { maxNights } = person;
+  if (maxNights !== null && stats.nights > maxNights) {
+    const over = stats.nights - maxNights;
+    score += HARD * over;
+    units += over;
+    if (sink !== undefined) {
+      const message = `${nightShifts(stats.nights)} (max. ${maxNights})`;
+      report(sink, 'M13', p, monthNights(ctx, row), message, HARD * over);
     }
   }
 
