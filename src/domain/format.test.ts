@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { fmtH, days, nightShifts, shortDate, twelveShifts, weekendShifts } from './format';
+import { clock, fmtH, days, nightShifts, shortDate, twelveShifts, weekendShifts } from './format';
 
 describe('fmtH', () => {
   it('prints whole hours without a decimal part', () => {
@@ -86,5 +86,22 @@ describe('shortDate', () => {
   });
   it('does not depend on the year', () => {
     expect(shortDate('2028-02-29')).toBe('29. 2.');
+  });
+});
+
+describe('clock', () => {
+  it('gives minutes from midnight as hours and minutes, with no zero before the hour', () => {
+    expect(clock(480)).toBe('8:00');
+    expect(clock(390)).toBe('6:30');
+    expect(clock(725)).toBe('12:05');
+    expect(clock(0)).toBe('0:00');
+  });
+  it('keeps two digits for the minutes', () => {
+    expect(clock(1)).toBe('0:01');
+    expect(clock(61)).toBe('1:01');
+    expect(clock(599)).toBe('9:59');
+  });
+  it('reaches 24:00 at the end of the day', () => {
+    expect(clock(1440)).toBe('24:00');
   });
 });

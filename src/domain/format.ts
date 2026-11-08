@@ -44,3 +44,11 @@ export function nightShifts(n: number): string {
 export function shortDate(date: string): string {
   return `${Number(date.slice(8, 10))}. ${Number(date.slice(5, 7))}.`;
 }
+
+/**
+ * A time of day from whole minutes after midnight, as the Czech `H:MM`: `480` gives `8:00`, `390`
+ * gives `6:30`. The end of the day, `1440`, is `24:00`.
+ */
+export function clock(minutes: number): string {
+  return `${Math.floor(minutes / 60)}:${String(minutes % 60).padStart(2, '0')}`;
+}

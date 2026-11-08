@@ -1,6 +1,7 @@
 import { CODE_NAMES, Code, isAbsence, isNight, isShift, isTwelveShift } from '../codes';
 import type { MonthContext } from '../context';
 import type { ShiftName } from '../types';
+import { doctorWish } from './doctorWish';
 import { personMusts } from './personMusts';
 import { personWishes } from './personWishes';
 import { preferenceWishes } from './preferenceWishes';
@@ -80,6 +81,7 @@ export function evaluatePerson(
     weeklyRest(ctx, p, row, stats, sink) +
     personWishes(ctx, p, row, stats, sink) +
     weekendWishes(ctx, p, row, stats, sink) +
-    preferenceWishes(ctx, p, row, stats, sink);
+    preferenceWishes(ctx, p, row, stats, sink) +
+    doctorWish(ctx, p, row, sink);
   return { score, stats };
 }

@@ -64,6 +64,22 @@ describe('ctxFor', () => {
     expect(() => ctxFor('2027-02', [{ before: 'R1 R1 R1 R1 R1 R1 R1 R1' }])).toThrow('room for 7');
     expect(() => ctxFor('2027-02', [{ before: 'R3' }])).toThrow('Unknown code "R3"');
   });
+  it('stores the doctor notes of a patch, which reach the context as minutes, or -1 for none', () => {
+    // February 2027 starts on a Monday: the tail is Mon 25 to Sun 31 January (days 0 to 6), and
+    // Wed 3 February is day 9
+    const c = ctxFor('2027-02', [
+      { doctor: { '2027-02-03': { from: 480, to: 720 }, '2027-01-31': { from: 30, to: 90 } } },
+      { doctor: { '2027-02-03': { from: 900, to: 960 } } },
+      {},
+    ]);
+    const notes = (p: number) =>
+      Array.from(c.people[p].doctorFrom).flatMap((from, i) =>
+        from < 0 ? [] : [[i, from, c.people[p].doctorTo[i]]],
+      );
+    expect(notes(0)).toEqual([[6, 30, 90], [9, 480, 720]]);
+    expect(notes(1)).toEqual([[9, 900, 960]]);
+    expect(notes(2)).toEqual([]);
+  });
   it('lays the settings over the defaults', () => {
     const wishLevels = { ...defaultSettings().wishLevels, W6: 5 as const };
     const c = ctxFor('2027-02', 1, { minRestHours: 10, wishLevels });

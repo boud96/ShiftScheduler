@@ -9,6 +9,7 @@ import type { MonthEval } from '../domain/rules/evaluate';
 import type { Finding, RuleId } from '../domain/rules/types';
 import type {
   CodeName,
+  DoctorNote,
   FairnessCounts,
   ISODate,
   MonthKey,
@@ -41,6 +42,11 @@ export interface PersonPatch {
    * among them (`EnginePerson.restBefore`).
    */
   before?: string;
+  /**
+   * The person's doctor's appointments, by date, in minutes from midnight (see `DoctorNote`). They
+   * are no cells of the rows: the context carries them as `EnginePerson.doctorFrom` and `doctorTo`.
+   */
+  doctor?: Record<ISODate, DoctorNote>;
 }
 
 /**
@@ -66,6 +72,9 @@ export function ctxFor(
     person.maxNights = patch.maxNights ?? null;
     for (const [date, code] of Object.entries(patch.pinned ?? {})) {
       (data.cells[date] ??= {})[person.id] = { code, pinned: true };
+    }
+    for (const [date, note] of Object.entries(patch.doctor ?? {})) {
+      (data.doctor[date] ??= {})[person.id] = note;
     }
     if (patch.nextDay !== undefined) {
       const after = `${addMonths(month, 1)}-01`;
