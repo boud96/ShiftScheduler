@@ -40,6 +40,11 @@ function twelveShifts(
  * month and both 12-hour days. A holiday is a day of its own, never one half of a weekend. A
  * weekend that is cut by the turn of the month, or whose Saturday or Sunday is a weekday by the
  * settings, is none.
+ *
+ * W5b grows with each weekend of the month that goes against the person's style: the k-th such
+ * weekend costs k² × W5b (W5b, then 4 × W5b, then 9 × W5b). So when some weekends must be split,
+ * one each for two people (2 × W5b) costs far less than two for one person (5 × W5b), and the
+ * split weekends are shared out.
  */
 function weekends(ctx: MonthContext, p: number, row: Uint8Array, sink?: Sink): number {
   const { days, first } = ctx;
@@ -48,6 +53,7 @@ function weekends(ctx: MonthContext, p: number, row: Uint8Array, sink?: Sink): n
   const { W5b, W5c } = ctx.weights;
   const n = days.length;
   let score = 0;
+  let against = 0; // the weekends so far that go against the person's style (W5b)
 
   // the first Saturday of the month, then every 7th day after it
   const firstSaturday = first + ((SATURDAY - days[first].weekday + 7) % 7);
@@ -60,17 +66,21 @@ function weekends(ctx: MonthContext, p: number, row: Uint8Array, sink?: Sink): n
 
     // W5b: whole weekends are both days with one shift (or neither); single days, never both
     if (weekendStyle === 'whole' && (onA !== onB || (onA && a !== b))) {
-      score += W5b;
-      if (sink !== undefined && W5b > 0) {
+      against++;
+      const penalty = against * against * W5b;
+      score += penalty;
+      if (sink !== undefined && penalty > 0) {
         const message =
           onA !== onB ? 'rozdělený víkend' : `víkend ${CODE_NAMES[a]} + ${CODE_NAMES[b]}`;
-        report(sink, 'W5b', p, [sat, sat + 1], message, W5b);
+        report(sink, 'W5b', p, [sat, sat + 1], message, penalty);
       }
     } else if (weekendStyle === 'single' && onA && onB) {
-      score += W5b;
-      if (sink !== undefined && W5b > 0) {
+      against++;
+      const penalty = against * against * W5b;
+      score += penalty;
+      if (sink !== undefined && penalty > 0) {
         const message = 'celý víkend, i když chce jednotlivé dny';
-        report(sink, 'W5b', p, [sat, sat + 1], message, W5b);
+        report(sink, 'W5b', p, [sat, sat + 1], message, penalty);
       }
     }
 

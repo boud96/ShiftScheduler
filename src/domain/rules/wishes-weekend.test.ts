@@ -202,12 +202,34 @@ describe('W5b in detail', () => {
     expect(unitsOf('W5b', '- - - - - DOV -', whole)).toBe(0);
   });
   it('whole: judges each weekend of the month on its own', () => {
-    // split by its Saturday, whole, none, split by its Sunday
+    // split by its Saturday, whole, none, split by its Sunday: the second split weekend costs 2²
     const strip = at({ 5: 'R12', 12: 'R12', 13: 'R12', 20: 'R12' });
     expect(listed(found('W5b', strip, [], whole), whole)).toEqual([
       { message: 'rozdělený víkend', days: [5, 6], units: 1 },
-      { message: 'rozdělený víkend', days: [19, 20], units: 1 },
+      { message: 'rozdělený víkend', days: [19, 20], units: 4 },
     ]);
+  });
+  it('charges the k-th weekend against the style k² times W5b', () => {
+    // four split weekends of one person cost 1, 4, 9 and 16 units, in the order of the weekends
+    const strip = at({ 5: 'R12', 13: 'N12', 19: 'R12', 20: 'N12', 26: 'N12' });
+    expect(listed(found('W5b', strip, [], whole), whole)).toEqual([
+      { message: 'rozdělený víkend', days: [5, 6], units: 1 },
+      { message: 'rozdělený víkend', days: [12, 13], units: 4 },
+      { message: 'rozdělený víkend', days: [26, 27], units: 16 },
+      { message: 'víkend R12 + N12', days: [19, 20], units: 9 },
+    ]);
+    expect(unitsOf('W5b', strip, whole)).toBe(30);
+    // a whole weekend between two split ones does not count
+    expect(unitsOf('W5b', at({ 5: 'R12', 12: 'R12', 13: 'R12', 19: 'R12' }), whole)).toBe(5);
+  });
+  it('counts the weekends against the style of each person on their own', () => {
+    // two people with one split weekend each cost 1 unit each, one person with two costs 1 + 4
+    const person: PersonPatch = { prefs: { weekendStyle: 'whole' } };
+    const two = ctxFor('2027-02', [person, person]);
+    const apart = run(two, rowsOf(two, [at({ 5: 'R12' }), at({ 12: 'R12' })]));
+    expect(units(apart, two, 'W5b')).toBe(2);
+    const together = run(two, rowsOf(two, [at({ 5: 'R12', 12: 'R12' }), '']));
+    expect(units(together, two, 'W5b')).toBe(5);
   });
   it('single: lists a weekend of two shifts, whatever they are', () => {
     const text = 'celý víkend, i když chce jednotlivé dny';
@@ -217,7 +239,8 @@ describe('W5b in detail', () => {
     expect(listed(found('W5b', '- - - - - N12 R12', [], single), single)).toEqual([
       { message: text, days: [5, 6], units: 1 },
     ]);
-    expect(unitsOf('W5b', at({ 5: 'R12', 6: 'R12', 12: 'R12', 13: 'R12' }), single)).toBe(2);
+    // two whole weekends against the style: 1 + 4 units
+    expect(unitsOf('W5b', at({ 5: 'R12', 6: 'R12', 12: 'R12', 13: 'R12' }), single)).toBe(5);
   });
   it('single: asks nothing of single days', () => {
     expect(unitsOf('W5b', '- - - - - R12 -', single)).toBe(0);
