@@ -33,12 +33,14 @@ describe('rhythm wishes', () => {
   });
   it('W3: long stretches and lone free days', () => {
     expect(u('- - R2 R2 R2 R12 R12 | - - R1 R1 R1', 'W3')).toBe(0);
-    expect(u('R1 R1 R1 R1 R1 R12 R12 | - O O O O N12', 'W3')).toBe(1 + 1 + 3);
+    // 7 days (M9's), 1 day off, 5 days: 1 for the day off after 5 or more, 3 for 12 days with
+    // one day off, and a half for the lone day off
+    expect(u('R1 R1 R1 R1 R1 R12 R12 | - O O O O N12', 'W3')).toBe(1 + 3 + 0.5);
   });
   it('W3 counts a stretch that started last month', () => {
     const j = ctxFor('2027-01', 1);
-    // Dec 26 – Jan 2 is an 8-day stretch: 8 − 6 = 2
-    expect(units(run(j, rowsOf(j, ['R12 R12'], ['- R12 R12 R1 R1 R1 R1'])), j, 'W3')).toBe(2);
+    // Dec 28 – Jan 2 is a 6-day stretch
+    expect(units(run(j, rowsOf(j, ['R12 R12'], ['- - - R1 R1 R1 R1'])), j, 'W3')).toBe(1);
   });
   it('W4a: runs', () => {
     const x = ctxFor('2027-02', [{ prefs: { nights: 'extra' } }]);
@@ -215,57 +217,81 @@ describe('W3 in detail', () => {
   const five = 'R1 R1 R1 R1 R1';
   const six = 'R1 R1 R1 R1 R1 R12';
 
-  it('asks nothing of 6 days in a row, and a unit for each day beyond', () => {
-    expect(u(six, 'W3')).toBe(0);
-    expect(listed(found('W3', 'R1 R1 R1 R1 R1 R12 R12'))).toEqual([
-      { message: '7 dní v kuse', days: range(0, 6), units: 1 },
+  it('six days costs W3', () => {
+    expect(listed(found('W3', six))).toEqual([
+      { message: '6 dní v kuse (ideálně nejvýš 5)', days: range(0, 5), units: 1 },
     ]);
-    expect(u('R1 R1 R1 R1 R1 R12 R12 | R1', 'W3')).toBe(2);
+  });
+  it('a single day off is a quiet W3', () => {
+    expect(found('W3', 'R1 R1 - R1 R1')).toEqual([{
+      rule: 'W3',
+      severity: 'wish',
+      person: 0,
+      days: [c.first + 1, c.first + 2, c.first + 3],
+      message: 'jen 1 den volna',
+      penalty: 0.5 * c.weights.W3,
+      quiet: true,
+    }]);
+  });
+  it('seven days is no W3 but M9', () => {
+    const ev = run(c, rowsOf(c, ['R1 R1 R1 R1 R1 R12 R12']));
+    expect(rules(ev, 'W3')).toEqual([]);
+    expect(rules(ev, 'M9')).toHaveLength(1);
+  });
+  it('asks nothing of 5 days in a row, nor of more than 6, which are M9\'s', () => {
+    expect(u(five, 'W3')).toBe(0);
+    expect(u('R1 R1 R1 R1 R1 R12 R12 | R1', 'W3')).toBe(0);
   });
   it('adds a unit when 5 days of work are followed by 1 day off and more work', () => {
     expect(listed(found('W3', `${five} - R1`))).toEqual([
+      { message: 'jen 1 den volna', days: [4, 5, 6], units: 0.5 },
       { message: 'po 5 dnech práce jen 1 den volna', days: range(0, 6), units: 1 },
     ]);
-    expect(u('R1 R1 R1 R1 - R1', 'W3')).toBe(0); // only 4 days
+    expect(u('R1 R1 R1 R1 - R1', 'W3')).toBe(0.5); // only 4 days: the lone day off alone
     expect(u(`${five} - - R1`, 'W3')).toBe(0); // 2 days off
     expect(u(pad(22, five), 'W3')).toBe(0); // the day off is the last day: no work follows
   });
   it('adds 3 for a day off between stretches that make 12 days or more', () => {
     expect(listed(found('W3', `${six} - ${six}`))).toEqual([
       { message: '12 pracovních dní jen s jedním dnem volna', days: range(0, 12), units: 3 },
+      { message: '6 dní v kuse (ideálně nejvýš 5)', days: range(0, 5), units: 1 },
+      { message: '6 dní v kuse (ideálně nejvýš 5)', days: range(7, 12), units: 1 },
+      { message: 'jen 1 den volna', days: [5, 6, 7], units: 0.5 },
       { message: 'po 6 dnech práce jen 1 den volna', days: range(0, 7), units: 1 },
     ]);
-    expect(u(`${six} - ${five}`, 'W3')).toBe(1); // 6 + 5 = 11: only the unit for the 6 days
+    // 6 + 5 = 11: the 6 days, the day off after them, and the lone day off
+    expect(u(`${six} - ${five}`, 'W3')).toBe(1 + 1 + 0.5);
   });
   it('takes an absence or a request for a day off like any other', () => {
     for (const off of ['-', 'x', 'DOV', 'MD', 'OP', 'NEM']) {
-      expect(u(`${six} ${off} ${six}`, 'W3')).toBe(1 + 3);
+      expect(u(`${six} ${off} ${six}`, 'W3')).toBe(2 + 1 + 3 + 0.5);
     }
   });
   it('judges each single day off on its own', () => {
-    expect(u(`${six} - ${six} - ${six}`, 'W3')).toBe(1 + 1 + 3 + 3);
-    expect(u(`${five} - ${five} - ${five}`, 'W3')).toBe(1 + 1);
+    // three times 6 days, two days off after 6, twice 12 days, two lone days off
+    expect(u(`${six} - ${six} - ${six}`, 'W3')).toBe(3 + 2 + 2 * 3 + 2 * 0.5);
+    expect(u(`${five} - ${five} - ${five}`, 'W3')).toBe(2 + 2 * 0.5);
   });
   it('sees the work at the very end of the month', () => {
-    expect(u(pad(21, 'R1 R1 R1 R1 R1 R12 R12'), 'W3')).toBe(1); // 7 days up to the last
-    expect(u(pad(21, five, '-', 'R1'), 'W3')).toBe(1); // 5 days, 1 off, work on the last day
+    expect(u(pad(22, 'R1 R1 R1 R1 R12 R12'), 'W3')).toBe(1); // 6 days up to the last
+    expect(u(pad(21, five, '-', 'R1'), 'W3')).toBe(1 + 0.5); // 5 days, 1 off, work on the last
   });
   it('counts a stretch that began last month, but not one that ended there', () => {
-    const week = 'R1 R1 R1 R1 R1 R1 R1';
-    expect(found('W3', '', [week])).toEqual([]); // 7 days, all of them last month's
-    expect(listed(found('W3', 'R1', [week]))).toEqual([
-      { message: '8 dní v kuse', days: range(-7, 0), units: 2 },
+    expect(found('W3', '', ['R1 R1 R1 R1 R1 R1 -'])).toEqual([]); // 6 days, all last month's
+    expect(listed(found('W3', 'R1', ['- - R1 R1 R1 R1 R1']))).toEqual([
+      { message: '6 dní v kuse (ideálně nejvýš 5)', days: range(-5, 0), units: 1 },
     ]);
-    // 14 days from the first day of the tail: 14 - 6, and no day off before it
-    expect(units(run(c, rowsOf(c, [week], [week])), c, 'W3')).toBe(8);
   });
   it('counts a day off at the turn of the month against the work after it', () => {
     const tail = ['- R1 R1 R1 R1 R1 -'];
     expect(listed(found('W3', `${five} R1`, tail))).toEqual([
+      { message: '6 dní v kuse (ideálně nejvýš 5)', days: range(0, 5), units: 1 },
+      { message: 'jen 1 den volna', days: [-2, -1, 0], units: 0.5 },
       { message: 'po 5 dnech práce jen 1 den volna', days: range(-6, 0), units: 1 },
     ]);
-    // 7 days of work after the day off: 1 for the length, 1 for the day off, 3 for 5 + 7 = 12
-    expect(units(run(c, rowsOf(c, [`${five} R1 R1`], tail)), c, 'W3')).toBe(1 + 1 + 3);
+    // 7 days of work after the day off (M9's): 1 for the day off after 5, 3 for 5 + 7 = 12, and
+    // a half for the lone day off
+    expect(units(run(c, rowsOf(c, [`${five} R1 R1`], tail)), c, 'W3')).toBe(1 + 3 + 0.5);
     // a day off between two stretches of the previous month is last month's
     expect(found('W3', '', ['R1 R1 R1 R1 R1 - R1'])).toEqual([]);
     expect(found('W3', 'R1', ['R1 R1 R1 R1 R1 - R1'])).toEqual([]);
@@ -465,9 +491,9 @@ describe('W4d in detail', () => {
 });
 
 describe('the wishes of a person', () => {
-  // Every wish fires: a 7-day stretch (W3) of changing shifts (W2), a lone day off, overtime (W1),
-  // and three runs of nights (W4a), the first short, after R2, R1 and N (W4b) and before R1 and N
-  // (W4c), for someone who takes nights only in need (W4d).
+  // Every wish fires: a 7-day stretch of changing shifts (W2) and lone days off (W3), overtime
+  // (W1), and three runs of nights (W4a), the first short, after R2, R1 and N (W4b) and before R1
+  // and N (W4c), for someone who takes nights only in need (W4d).
   const messy =
     'R1 R2 R2 R1 O R12 R12 | - R2 R2 R2 R2 R12 - | R2 N N - R1 - N | N N - N N N -';
   const ifNeeded = ctxFor('2027-02', [{ prefs: { nights: 'ifNeeded' } }]);
@@ -511,7 +537,7 @@ describe('the wishes of a person', () => {
   it.each<[WishId, string]>([
     ['W1', 'R2 R2 R2 R2 R2 R12 R12 | - R2 R2 R2 R2 - - | R2 R2 R2 R2 R2 - - | R2 R2 R2'],
     ['W2', 'R1 R2'],
-    ['W3', 'R1 R1 R1 R1 R1 R12 R12'],
+    ['W3', 'R1 R1 R1 R1 R1 R12'],
     ['W4a', 'N N'],
     ['W4b', 'R2 N N'],
     ['W4c', 'N N N - R1'],
@@ -582,8 +608,11 @@ describe('the wishes on rows of any kind', () => {
         expect(f.person).toBe(p);
         expect(f.penalty).toBeGreaterThan(0);
         expect(f.message).not.toBe('');
-        // only the nights of someone who takes them as usual are quiet; no other has the field
-        const quiet = f.rule === 'W4d' && people[p].prefs?.nights === 'normal';
+        // only the nights of someone who takes them as usual and the lone days off are quiet; no
+        // other has the field
+        const quiet =
+          (f.rule === 'W4d' && people[p].prefs?.nights === 'normal') ||
+          (f.rule === 'W3' && f.message === 'jen 1 den volna');
         expect(f.quiet).toBe(quiet ? true : undefined);
         for (const d of f.days) expect(Number.isInteger(d) && d >= 0 && d < row.length).toBe(true);
         // a wish is reported only if it touches the month (W1 and the like name no day)

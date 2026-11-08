@@ -11,8 +11,11 @@ import type { Finding, PersonStats, Sink } from './types';
 const OVERTIME_TOLERANCE = 1e-9;
 /** W2: a block of one weekday shift should last this many days at least. */
 const MIN_BLOCK = 4;
-/** W3: a stretch of work longer than this many days is too long. */
-const MAX_STRETCH = 6;
+/**
+ * W3: a stretch of work should last this many days at most. One day more costs W3; more than that
+ * is left to rule M9 (at most 6 days in a row by default).
+ */
+const IDEAL_STRETCH = 5;
 /** W3: after a stretch of this many days or more, one day off is too few. */
 const TIRING_STRETCH = 5;
 /** W3: one day off between stretches that make this many days of work or more is too few. */
@@ -154,6 +157,14 @@ function stretchBlocks(
 /**
  * W2 and W3 for every stretch of work (days with a shift, between days off) that reaches into the
  * month. A stretch that ended before the month was judged with the month it belongs to.
+ *
+ * W3 asks for stretches of 5 days at most, with days off in pairs:
+ * - a stretch of 6 days costs W3 (a longer one is left to M9);
+ * - one day off after 5 days of work or more costs W3 (after 6 or more, M10's too);
+ * - one day off between stretches that make 12 days of work or more costs 3 × W3;
+ * - and every single day off between two days of work costs W3 / 2. Such a finding is quiet, so
+ *   that the checks list is not flooded with them. Like the day off after 5 days, it counts when
+ *   the work after it is in the month.
  */
 function rhythm(ctx: MonthContext, p: number, row: Uint8Array, sink?: Sink): number {
   const { first } = ctx;
@@ -175,18 +186,29 @@ function rhythm(ctx: MonthContext, p: number, row: Uint8Array, sink?: Sink): num
     if (e >= first) {
       const length = e - s + 1;
 
-      // W3: more than 6 days in a row
-      if (length > MAX_STRETCH) {
-        const penalty = (length - MAX_STRETCH) * W3;
+      // W3: one day longer than the ideal stretch
+      if (length === IDEAL_STRETCH + 1) {
+        const penalty = W3;
         score += penalty;
         if (sink !== undefined && penalty > 0) {
-          report(sink, 'W3', p, span(s, e), `${fmtDays(length)} v kuse`, penalty);
+          const message = `${fmtDays(length)} v kuse (ideálně nejvýš ${IDEAL_STRETCH})`;
+          report(sink, 'W3', p, span(s, e), message, penalty);
         }
       }
 
       // W3: the stretch before this one ends 2 days before it starts, so one day off lies between
       if (prevEnd === s - 2) {
         const before = prevEnd - prevStart + 1;
+
+        // a single day off, where two would be better; it counts when the work after it is in
+        // the month
+        if (s >= first) {
+          const penalty = 0.5 * W3;
+          score += penalty;
+          if (sink !== undefined && penalty > 0) {
+            report(sink, 'W3', p, [s - 2, s - 1, s], 'jen 1 den volna', penalty, true);
+          }
+        }
 
         // after 5 days or more, one day off is too few; it counts when the work after it is in the
         // month

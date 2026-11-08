@@ -4,6 +4,7 @@ import type { ShiftName } from '../types';
 import { personMusts } from './personMusts';
 import { personWishes } from './personWishes';
 import { preferenceWishes } from './preferenceWishes';
+import { runMusts, weeklyRest } from './restMusts';
 import type { PersonStats, Sink } from './types';
 import { weekendWishes } from './weekendWishes';
 
@@ -68,6 +69,8 @@ export function evaluatePerson(
   countMonth(ctx, row, stats);
   const score =
     personMusts(ctx, p, row, stats, sink) +
+    runMusts(ctx, p, row, stats, sink) +
+    weeklyRest(ctx, p, row, stats, sink) +
     personWishes(ctx, p, row, stats, sink) +
     weekendWishes(ctx, p, row, stats, sink) +
     preferenceWishes(ctx, p, row, stats, sink);

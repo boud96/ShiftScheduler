@@ -34,7 +34,10 @@ describe('PersonStats', () => {
       holidayTwelve: 1, // N12 on 1 Jan
       festive: 1, // 1 Jan
       perShift: [1, 1, 1, 1, 1], // R1, R2, O20, O, N
-      mustUnits: 2, // N12 -> R12 leaves no rest, and 72 h is below the FPD of 157.5 h
+      // N12 -> R12 leaves no rest (M2), 72 h is below the FPD of 157.5 h (M6), Thu 31 Dec to Fri
+      // 8 Jan are 9 days in a row, 3 over the maximum (M9), and the windows of 7 days from Fri 1
+      // and Sat 2 Jan hold no rest of 35 h (M11)
+      mustUnits: 1 + 1 + 3 + 2,
     });
   });
   it('does not count the previous month, though it holds 12-hour shifts and festive days', () => {

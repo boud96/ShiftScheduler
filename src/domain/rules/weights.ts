@@ -1,6 +1,6 @@
 import type { Level, WishId } from '../types';
 
-/** Score of one broken must (M2-M5, M7, M8) or one person too many on a shift (M1). */
+/** Score of one broken must (M2-M5, M7-M11) or one person too many on a shift (M1). */
 export const HARD = 1e9;
 /** Score of one missing person on a shift (M1). */
 export const GAP = 1e6;

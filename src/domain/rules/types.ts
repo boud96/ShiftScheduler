@@ -2,9 +2,21 @@ import type { WishId } from '../types';
 
 /**
  * M1 coverage, M2 rest between shifts, M3 active period, M4 night before a request or absence,
- * M5 12-hour maximum, M6 FPD, M7 no nights, M8 day type.
+ * M5 12-hour maximum, M6 FPD, M7 no nights, M8 day type, M9 days in a row, M10 days off after a
+ * long run, M11 weekly rest.
  */
-export type MustId = 'M1' | 'M2' | 'M3' | 'M4' | 'M5' | 'M6' | 'M7' | 'M8';
+export type MustId =
+  | 'M1'
+  | 'M2'
+  | 'M3'
+  | 'M4'
+  | 'M5'
+  | 'M6'
+  | 'M7'
+  | 'M8'
+  | 'M9'
+  | 'M10'
+  | 'M11';
 export type RuleId = MustId | WishId;
 
 /** One broken must or one unmet wish, with the text the team lead reads. */
