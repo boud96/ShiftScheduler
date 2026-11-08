@@ -80,6 +80,7 @@ const NAMES_LINE = 'První sloupec vypadá jako jména, vynechá se.';
 
 const cell = (person: PersonId, date: ISODate) => screen.getByTestId(`cell-${person}-${date}`);
 const stored = (date: ISODate, person: PersonId) => (app.data as AppData).cells[date]?.[person];
+const noted = (date: ISODate, person: PersonId) => (app.data as AppData).doctor[date]?.[person];
 const next = () => userEvent.click(screen.getByText('▶'));
 
 const opener = () => screen.getByRole('button', { name: 'Vložit z Excelu' });
@@ -320,6 +321,24 @@ describe('the preview', () => {
     expect(summary()).toHaveTextContent(/^Rozpoznáno: 0 · Ignorováno: 1$/);
     setText('');
     expect(summary()).toHaveTextContent(/^Rozpoznáno: 0 · Ignorováno: 0$/);
+  });
+
+  it("the preview counts doctor's notes as recognised", async () => {
+    renderMonth();
+    await open();
+    setText('x\tL 8-12\tfoo\tl 8:30 - 12:00');
+    expect(summary()).toHaveTextContent(/^Rozpoznáno: 3 · Ignorováno: 1$/);
+    expect(ignored()).toEqual(['foo (řádek 1, sloupec 3)']);
+    setText('L 8-12'); // a note in the first column is a day, not a name
+    expect(summary()).toHaveTextContent(/^Rozpoznáno: 1 · Ignorováno: 0$/);
+    expect(within(dialog()).queryByText(NAMES_LINE)).toBeNull();
+    setText('x\tL\tL 8\tL 12-8'); // an L with no usable time is a value that is left out
+    expect(summary()).toHaveTextContent(/^Rozpoznáno: 1 · Ignorováno: 3$/);
+    expect(ignored()).toEqual([
+      'L (řádek 1, sloupec 2)',
+      'L 8 (řádek 1, sloupec 3)',
+      'L 12-8 (řádek 1, sloupec 4)',
+    ]);
   });
 
   it('is a live region, so that the count is read out when it changes', async () => {
@@ -600,6 +619,118 @@ describe('what Použít stores', () => {
     expect(cell('C', '2027-01-07')).toHaveTextContent('R1📌');
     expect(screen.getByText(/Operátor C · 6\. 1\.: R1 hned po O: jen 8 h odpočinku/)).toBeVisible();
     expect(screen.getByTestId('totals-C')).toHaveTextContent('15 / 0');
+  });
+});
+
+// --- Doctor's notes --------------------------------------------------------------------------
+
+describe("doctor's notes", () => {
+  it('turns Použít on for notes alone, and stores them without a cell', async () => {
+    renderMonth(plan(3));
+    await userEvent.click(cell('B', '2027-01-06'));
+    await open();
+    setText('L 8-12\tL 8:30-12');
+    expect(summary()).toHaveTextContent(/^Rozpoznáno: 2 · Ignorováno: 0$/);
+    expect(apply()).toBeEnabled();
+    await userEvent.click(apply());
+
+    expect(screen.queryByRole('dialog')).toBeNull();
+    expect(noted('2027-01-06', 'B')).toStrictEqual({ from: 480, to: 720 });
+    expect(noted('2027-01-07', 'B')).toStrictEqual({ from: 510, to: 720 });
+    expect(stored('2027-01-06', 'B')).toBeUndefined(); // an L writes no code
+    // The grid shows the marker L, and the time is in the title of the cell.
+    expect(cell('B', '2027-01-06')).toHaveTextContent(/^L$/);
+    expect(cell('B', '2027-01-06')).toHaveAttribute(
+      'title',
+      'Operátor B · 6. 1. · lékař 8:00–12:00',
+    );
+    expect(cell('B', '2027-01-07')).toHaveAttribute(
+      'title',
+      'Operátor B · 7. 1. · lékař 8:30–12:00',
+    );
+    expect(opener()).toHaveFocus();
+  });
+
+  it('keeps the shift or the absence of the day and adds the note beside it', async () => {
+    const data = plan(2);
+    put(data, '2027-01-05', 'A', 'R1', true);
+    put(data, '2027-01-06', 'A', 'DOV');
+    renderMonth(data);
+    await userEvent.click(cell('A', '2027-01-05'));
+    await open();
+    await paste('L 8-12\tL 9-10');
+    await userEvent.click(apply());
+    expect(stored('2027-01-05', 'A')).toStrictEqual({ code: 'R1', pinned: true });
+    expect(stored('2027-01-06', 'A')).toStrictEqual({ code: 'DOV' });
+    expect(noted('2027-01-05', 'A')).toStrictEqual({ from: 480, to: 720 });
+    expect(noted('2027-01-06', 'A')).toStrictEqual({ from: 540, to: 600 });
+    expect(cell('A', '2027-01-05')).toHaveTextContent('R1📌L');
+    expect(cell('A', '2027-01-06')).toHaveTextContent('DOVL');
+  });
+
+  it('stores the codes and the notes of one paste together', async () => {
+    renderMonth(plan(3));
+    await open();
+    await paste('R1\tL 8-12\nL 9-10\tN');
+    expect(summary()).toHaveTextContent(/^Rozpoznáno: 4 · Ignorováno: 0$/);
+    await userEvent.click(apply());
+    expect(stored('2027-01-01', 'A')).toStrictEqual({ code: 'R1', pinned: true });
+    expect(noted('2027-01-02', 'A')).toStrictEqual({ from: 480, to: 720 });
+    expect(noted('2027-01-01', 'B')).toStrictEqual({ from: 540, to: 600 });
+    expect(stored('2027-01-02', 'B')).toStrictEqual({ code: 'N', pinned: true });
+  });
+
+  it('keeps Použít off while every L has no usable time', async () => {
+    renderMonth();
+    await open();
+    setText('\tL\tL 8');
+    expect(summary()).toHaveTextContent(/^Rozpoznáno: 0 · Ignorováno: 2$/);
+    expect(apply()).toBeDisabled();
+  });
+
+  it('keeps Použít off when every note is left out for its place', async () => {
+    renderMonth();
+    await userEvent.click(cell('H', '2027-01-31'));
+    await open();
+    setText('\tL 8-12\nL 8-12'); // the first is on 1 February, the second below H
+    expect(summary()).toHaveTextContent(/^Rozpoznáno: 0 · Ignorováno: 2$/);
+    expect(apply()).toBeDisabled();
+  });
+
+  it('copies the note as L on a day without a shift, and the shift on one with', async () => {
+    const writeText = vi.fn<WriteText>(async () => undefined);
+    setClipboard(writeText);
+    const data = plan(2);
+    put(data, '2027-01-02', 'A', 'R1', true);
+    data.doctor['2027-01-02'] = { A: { from: 480, to: 720 } }; // beside a shift
+    data.doctor['2027-01-03'] = { A: { from: 510, to: 720 } };
+    renderMonth(data);
+    await userEvent.click(copyButton('Operátor A'));
+    expect(writeText).toHaveBeenCalledWith(`\tR1\tL 8:30-12${'\t'.repeat(28)}`);
+    await screen.findByText(COPIED);
+  });
+
+  it('pastes back a copied row, also when its first day holds a note', async () => {
+    const writeText = vi.fn<WriteText>(async () => undefined);
+    setClipboard(writeText);
+    const data = plan(3);
+    data.doctor['2027-01-01'] = { A: { from: 480, to: 720 } };
+    put(data, '2027-01-02', 'A', 'N', true);
+    data.doctor['2027-01-04'] = { A: { from: 510, to: 720 } };
+    renderMonth(data);
+    await userEvent.click(copyButton('Operátor A'));
+    await screen.findByText(COPIED);
+    const row = writeText.mock.calls[0][0];
+
+    await userEvent.click(cell('B', '2027-01-01'));
+    await open();
+    setText(row);
+    expect(within(dialog()).queryByText(NAMES_LINE)).toBeNull();
+    expect(summary()).toHaveTextContent(/^Rozpoznáno: 3 · Ignorováno: 0$/);
+    await userEvent.click(apply());
+    expect(noted('2027-01-01', 'B')).toStrictEqual({ from: 480, to: 720 });
+    expect(stored('2027-01-02', 'B')).toStrictEqual({ code: 'N', pinned: true });
+    expect(noted('2027-01-04', 'B')).toStrictEqual({ from: 510, to: 720 });
   });
 });
 

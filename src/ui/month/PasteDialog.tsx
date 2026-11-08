@@ -26,8 +26,9 @@ interface PasteDialogProps {
 
 /**
  * The dialog that takes cells copied from Excel. A preview under the field tells how many cells
- * are recognised and lists the values that are not, so the user sees what Použít would do before
- * it does it. It stores nothing itself: `onApply` is given the plan.
+ * are recognised (codes and doctor's notes alike) and lists the values that are not, so the user
+ * sees what Použít would do before it does it. It stores nothing itself: `onApply` is given the
+ * plan.
  *
  * It is a dialog on the page, like the question of the save bar: the focus goes into the field and
  * stays within the dialog, a click on the page behind or on the text does not take it away, and
@@ -46,6 +47,8 @@ export function PasteDialog({ data, month, start, onApply, onClose }: PasteDialo
     () => planPaste(data, month, { personId, date }, text),
     [data, month, personId, date, text],
   );
+  /** The cells that Použít would store: the codes and the doctor's notes. */
+  const recognised = plan.writes.length + plan.doctorWrites.length;
 
   const onKeyDown = (e: KeyboardEvent<HTMLElement>) => {
     if (e.key === 'Escape') onClose();
@@ -91,7 +94,7 @@ export function PasteDialog({ data, month, start, onApply, onClose }: PasteDialo
         />
         {/* A live region, so that the count is read out when the text changes. */}
         <div role="status">
-          <p>{paste.summary(plan.writes.length, plan.ignored.length)}</p>
+          <p>{paste.summary(recognised, plan.ignored.length)}</p>
           {plan.namesColumn && <p>{paste.namesColumn}</p>}
         </div>
         {plan.ignored.length > 0 && (
@@ -105,7 +108,7 @@ export function PasteDialog({ data, month, start, onApply, onClose }: PasteDialo
           <button
             type="button"
             className="button button-primary"
-            disabled={plan.writes.length === 0}
+            disabled={recognised === 0}
             onClick={() => onApply(plan)}
           >
             {paste.apply}

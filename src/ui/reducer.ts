@@ -30,6 +30,7 @@ export type Action =
   | { type: 'setDoctor'; date: ISODate; personId: PersonId; note: DoctorNote | null }
   /** Pins a shift, or unpins a pinned one. Any other cell is left as it is. */
   | { type: 'togglePin'; date: ISODate; personId: PersonId }
+  /** Stores a paste: the cells and the doctor's notes of the plan, in this one step. */
   | { type: 'applyPaste'; plan: PastePlan }
   | {
       type: 'applyGenerated';

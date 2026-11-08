@@ -1,9 +1,11 @@
 import { addDays, monthDays, tailDays } from '../domain/calendar';
 import { codeFromName, isShift, nameOf } from '../domain/codes';
 import { buildMonthGrid } from '../domain/context';
+import { clock } from '../domain/format';
 import type {
   AppData,
   CodeName,
+  DoctorNote,
   ISODate,
   MonthKey,
   PersonId,
@@ -11,12 +13,58 @@ import type {
 } from '../domain/types';
 
 /**
+ * An `L`, the time the appointment starts, a hyphen or an en dash, the time it ends. A time is the
+ * hours (0 to 23, with or without a leading zero) and, if given, a colon and the minutes (two
+ * digits, 00 to 59). The end may also be 24, which `parseDoctor` lets through with no minutes only.
+ * Spaces may follow the L and surround the dash.
+ */
+const DOCTOR = /^L\s*([01]?\d|2[0-3])(?::([0-5]\d))?\s*[-–]\s*(2[0-4]|[01]?\d)(?::([0-5]\d))?$/i;
+
+/**
+ * Reads a doctor's appointment as the team lead writes it in Excel, `L` with its time: `L 8-12`,
+ * `L8-12`, `l 8:30 - 12:00` or `L 8–12`. The spaces around the cell are ignored, as for a code.
+ * Anything else gives null, so that a cell which is no note is left out and not guessed at: a bare
+ * `L`, one time only, an end that is not after the start (a note is a stretch of one day), hours
+ * past 23 (24 is the end of the day, and allowed as the end only), minutes that are not two digits
+ * from 00 to 59, and text before the `L` or after the second time.
+ */
+export function parseDoctor(value: string): DoctorNote | null {
+  const match = DOCTOR.exec(value.trim());
+  if (match === null) return null;
+  const from = Number(match[1]) * 60 + Number(match[2] ?? 0);
+  const to = Number(match[3]) * 60 + Number(match[4] ?? 0);
+  return from < to && to <= 1440 ? { from, to } : null;
+}
+
+/**
+ * A doctor's note as the team lead writes it in Excel, which `parseDoctor` reads back: `L 8-12`,
+ * `L 8:30-12`. The times are those of `clock` with the `:00` of a whole hour left off, and the end
+ * of the day is 24.
+ */
+export function formatDoctor(note: DoctorNote): string {
+  const time = (minutes: number): string => clock(minutes).replace(/:00$/, '');
+  return `L ${time(note.from)}-${time(note.to)}`;
+}
+
+/** Whether the name of a code is that of a shift, not of an absence or an x. */
+function isShiftName(name: string): boolean {
+  const code = codeFromName(name);
+  return code !== null && isShift(code);
+}
+
+/**
  * One person's month as a row to paste into Excel: the code of each day, x and absences included,
- * or nothing on an empty day, separated by tabs. Pinned or not, a shift is just its name.
+ * or nothing on an empty day, separated by tabs. Pinned or not, a shift is just its name. A day
+ * without a shift that has a doctor's note gives the note instead (`L 8-12`, see `formatDoctor`),
+ * since a cell in Excel holds one of the two; a day with a shift gives the shift.
  */
 export function personRowTsv(data: AppData, month: MonthKey, personId: PersonId): string {
   return monthDays(month, data.settings)
-    .map(({ date }) => data.cells[date]?.[personId]?.code ?? '')
+    .map(({ date }) => {
+      const code = data.cells[date]?.[personId]?.code ?? '';
+      const note = data.doctor[date]?.[personId];
+      return note !== undefined && !isShiftName(code) ? formatDoctor(note) : code;
+    })
     .join('\t');
 }
 
@@ -35,6 +83,11 @@ export interface PastePlan {
   /** The cells to store, row by row. */
   writes: Array<{ personId: PersonId; date: ISODate; code: CodeName }>;
   /**
+   * The doctor's notes to store, row by row: the cells that read as `L` with a time. A note is
+   * kept beside the code of its day, so such a cell is no entry of `writes`.
+   */
+  doctorWrites: Array<{ personId: PersonId; date: ISODate; note: DoctorNote }>;
+  /**
    * The pasted values that were not used, row by row. `row` and `col` count from 0 in the text as
    * pasted (a names column included), and `value` is the cell as pasted.
    */
@@ -46,19 +99,32 @@ export interface PastePlan {
   namesColumn: boolean;
 }
 
-/** What a pasted cell holds: a code name, `''` if it is empty, or `null` if it is not a code. */
-function readCell(value: string): CodeName | '' | null {
+/** What a pasted cell holds: nothing, a code, a doctor's note, or something that is neither. */
+type Cell =
+  | { kind: 'empty' }
+  | { kind: 'code'; code: CodeName }
+  | { kind: 'doctor'; note: DoctorNote }
+  | { kind: 'other' };
+
+/** Reads a pasted cell as a code or a doctor's note, trimming it as `codeFromName` does. */
+function readCell(value: string): Cell {
   const code = codeFromName(value);
-  return code === null ? null : (nameOf(code) ?? '');
+  if (code !== null) {
+    const name = nameOf(code);
+    return name === null ? { kind: 'empty' } : { kind: 'code', code: name };
+  }
+  const note = parseDoctor(value);
+  return note === null ? { kind: 'other' } : { kind: 'doctor', note };
 }
 
 /**
- * The first column holds names, not days, when it has a value and none of its values is a code. An
- * empty first column is a day column: a copied row whose first day is empty starts that way.
+ * The first column holds names, not days, when it has a value and none of its values is a code or a
+ * doctor's note. An empty first column is a day column: a copied row whose first day is empty
+ * starts that way, and so does one whose first day is a note.
  */
 function hasNamesColumn(rows: string[][]): boolean {
-  const filled = rows.map((cells) => readCell(cells[0])).filter((cell) => cell !== '');
-  return filled.length > 0 && filled.every((cell) => cell === null);
+  const filled = rows.map((cells) => readCell(cells[0]).kind).filter((kind) => kind !== 'empty');
+  return filled.length > 0 && filled.every((kind) => kind === 'other');
 }
 
 /**
@@ -68,10 +134,12 @@ function hasNamesColumn(rows: string[][]): boolean {
  * column goes to `start.date` and the next columns to the next dates. Only the last 7 days of the
  * previous month and the days of `month` take a value.
  *
- * Empty cells write nothing. A value that is not a code, and a value that has no person (a row
- * beyond the last person, or a start person who is not in the month grid) or no valid date, is
- * listed in `ignored`. A first column holding only values that are not codes (and at least one) is
- * taken for names and left out, unlisted; `namesColumn` says so. `data` is not changed.
+ * Empty cells write nothing. A code goes to `writes` and a doctor's note (`L 8-12`, see
+ * `parseDoctor`) to `doctorWrites`, both under the same rules: the same people and the same days. A
+ * value that is neither, and a value that has no person (a row beyond the last person, or a start
+ * person who is not in the month grid) or no valid date, is listed in `ignored`. A first column
+ * holding only values that are neither codes nor notes (and at least one) is taken for names and
+ * left out, unlisted; `namesColumn` says so. `data` is not changed.
  */
 export function planPaste(
   data: AppData,
@@ -87,19 +155,21 @@ export function planPaste(
   );
   const { personIds } = buildMonthGrid(data, month);
   const first = personIds.indexOf(start.personId);
-  const plan: PastePlan = { writes: [], ignored: [], namesColumn };
+  const plan: PastePlan = { writes: [], doctorWrites: [], ignored: [], namesColumn };
 
   rows.forEach((cells, row) => {
     const personId = first < 0 ? undefined : personIds[first + row];
     cells.forEach((value, col) => {
       if (col < skip) return; // the names
-      const code = readCell(value);
-      if (code === '') return; // empty: nothing to write, nothing to report
+      const cell = readCell(value);
+      if (cell.kind === 'empty') return; // empty: nothing to write, nothing to report
       const date = addDays(start.date, col - skip);
-      if (personId !== undefined && code !== null && valid.has(date)) {
-        plan.writes.push({ personId, date, code });
-      } else {
+      if (personId === undefined || !valid.has(date) || cell.kind === 'other') {
         plan.ignored.push({ row, col, value });
+      } else if (cell.kind === 'code') {
+        plan.writes.push({ personId, date, code: cell.code });
+      } else {
+        plan.doctorWrites.push({ personId, date, note: cell.note });
       }
     });
   });
@@ -108,13 +178,16 @@ export function planPaste(
 
 /** A pasted shift is pinned, so that generating again keeps it; x and absences are fixed anyway. */
 function storedCell(code: CodeName): StoredCell {
-  const c = codeFromName(code);
-  return c !== null && isShift(c) ? { code, pinned: true } : { code };
+  return isShiftName(code) ? { code, pinned: true } : { code };
 }
 
 /**
- * Stores the cells of a plan in a copy of `data`, over whatever they held. Only `writes` is read,
- * so a plan built by hand needs no `ignored` or `namesColumn`.
+ * Stores the cells and the doctor's notes of a plan in a copy of `data`, over whatever they held.
+ * A note goes beside the cell of its day and leaves the cell as it is, and a cell that is stored
+ * leaves the notes of its day. Only `writes` and `doctorWrites` are read, so a plan built by hand
+ * needs no `ignored` or `namesColumn`, and one with no notes needs no `doctorWrites`. The plan is
+ * taken as it is: `planPaste` makes notes only for people of `data` and only for stretches of one
+ * day, as the save file asks.
  */
 export function applyPaste(
   data: AppData,
@@ -124,5 +197,9 @@ export function applyPaste(
   for (const { personId, date, code } of plan.writes) {
     cells[date] = { ...cells[date], [personId]: storedCell(code) };
   }
-  return { ...data, cells };
+  const doctor = { ...data.doctor };
+  for (const { personId, date, note } of plan.doctorWrites ?? []) {
+    doctor[date] = { ...doctor[date], [personId]: note };
+  }
+  return { ...data, cells, doctor };
 }

@@ -228,12 +228,36 @@ describe('applyPaste', () => {
           { personId: 'p1', date: '2027-01-04', code: 'R1' },
           { personId: 'p2', date: '2027-01-04', code: 'x' },
         ],
+        doctorWrites: [],
         ignored: [],
         namesColumn: false,
       },
     });
     expect(cellOf(next, '2027-01-04', 'p1')).toStrictEqual({ code: 'R1', pinned: true });
     expect(cellOf(next, '2027-01-04', 'p2')).toStrictEqual({ code: 'x' });
+  });
+
+  it("stores the doctor's notes of the plan in the step of its cells, beside them", () => {
+    const data = plan(['2027-01-04', 'p1', { code: 'O', pinned: true }]);
+    const next = reduce(data, {
+      type: 'applyPaste',
+      plan: {
+        writes: [{ personId: 'p2', date: '2027-01-04', code: 'R1' }],
+        doctorWrites: [
+          { personId: 'p1', date: '2027-01-04', note: { from: 480, to: 720 } },
+          { personId: 'p2', date: '2027-01-05', note: { from: 510, to: 720 } },
+        ],
+        ignored: [],
+        namesColumn: false,
+      },
+    });
+    expect(cellOf(next, '2027-01-04', 'p1')).toStrictEqual({ code: 'O', pinned: true });
+    expect(cellOf(next, '2027-01-04', 'p2')).toStrictEqual({ code: 'R1', pinned: true });
+    expect(next.doctor).toStrictEqual({
+      '2027-01-04': { p1: { from: 480, to: 720 } },
+      '2027-01-05': { p2: { from: 510, to: 720 } },
+    });
+    expect(parseSaveFile(serialize(next)).doctor).toEqual(next.doctor);
   });
 });
 
