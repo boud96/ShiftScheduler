@@ -38,10 +38,16 @@ describe('defaultSettings', () => {
     expect(s.maxTwelvePerMonth).toBe(3);
     expect(s.twelveTarget).toBe(2);
   });
-  it('rates all 15 wishes at level 3', () => {
+  it('has the limits of the newer rules: 6 days in a row, 2 weekend shifts, 35 h rest', () => {
+    const s = defaultSettings();
+    expect(s.maxDaysInRow).toBe(6);
+    expect(s.minWeekendShifts).toBe(2);
+    expect(s.weeklyRestHours).toBe(35);
+  });
+  it('rates all 16 wishes at level 3', () => {
     const { wishLevels } = defaultSettings();
     expect(Object.keys(wishLevels).sort()).toEqual([
-      'W1', 'W2', 'W3', 'W4a', 'W4b', 'W4c', 'W4d',
+      'W1', 'W10', 'W2', 'W3', 'W4a', 'W4b', 'W4c', 'W4d',
       'W5a', 'W5b', 'W5c', 'W5d', 'W6', 'W7', 'W8', 'W9',
     ]);
     expect(Object.values(wishLevels).every((level) => level === 3)).toBe(true);
@@ -80,6 +86,8 @@ describe('newPerson', () => {
         afterNights: [],
         notes: '',
       },
+      maxTwelve: null,
+      maxNights: null,
       allowance: { DOV: 25, MD: 5 },
       startingCounts: { twelve: 0, nights: 0, holidayTwelve: 0, festive: 0 },
     });
@@ -99,22 +107,25 @@ describe('newPerson', () => {
 });
 
 describe('newAppData', () => {
-  it('starts with 8 people, default settings and no cells or months', () => {
+  it('starts with 8 people, default settings and no cells, months or doctor notes', () => {
     const data = newAppData();
-    expect(data.schemaVersion).toBe(1);
+    expect(data.schemaVersion).toBe(2);
     expect(data.people.map((p) => p.id)).toEqual(['p1', 'p2', 'p3', 'p4', 'p5', 'p6', 'p7', 'p8']);
     expect(data.people.map((p) => p.name)).toEqual(
       Array.from({ length: 8 }, (_, i) => `Operátor ${i + 1}`));
     expect(data.settings).toEqual(defaultSettings());
     expect(data.cells).toEqual({});
     expect(data.months).toEqual({});
+    expect(data.doctor).toEqual({});
   });
   it('returns independent data every time', () => {
     const a = newAppData();
     a.people[0].activeFrom = '2027-01-18';
     a.cells['2027-01-04'] = { p1: { code: 'R1' } };
+    a.doctor['2027-01-04'] = { p1: { from: 480, to: 720 } };
     const b = newAppData();
     expect(b.people[0].activeFrom).toBeNull();
     expect(b.cells).toEqual({});
+    expect(b.doctor).toEqual({});
   });
 });

@@ -37,6 +37,10 @@ export interface Person {
   activeFrom: ISODate | null;
   activeTo: ISODate | null;
   prefs: Preferences;
+  /** The most 12-hour shifts a month for this person; null means the general maximum. */
+  maxTwelve: number | null;
+  /** The most nights (N and N12) a month for this person; null means no limit. */
+  maxNights: number | null;
   allowance: { DOV: number; MD: number };
   startingCounts: FairnessCounts;
 }
@@ -56,7 +60,8 @@ export type WishId =
   | 'W6'
   | 'W7'
   | 'W8'
-  | 'W9';
+  | 'W9'
+  | 'W10';
 /** How much a wish matters: 0 switches it off, 5 is the strongest. */
 export type Level = 0 | 1 | 2 | 3 | 4 | 5;
 
@@ -78,6 +83,12 @@ export interface Settings {
   fpdHoursPerWeekday: number;
   coverage: Record<ShiftName, Range>;
   minRestHours: number;
+  /** The most working days a person may have in a row. */
+  maxDaysInRow: number;
+  /** The fewest weekend shifts (R12 or N12) a person has in a month. */
+  minWeekendShifts: number;
+  /** The rest, in hours, that every 7 consecutive days must contain. */
+  weeklyRestHours: number;
   maxTwelvePerMonth: number;
   twelveTarget: number;
   wishLevels: Record<WishId, Level>;
@@ -93,6 +104,15 @@ export interface StoredCell {
   pinned?: boolean;
 }
 
+/**
+ * A doctor's appointment on one day, kept beside the code of that day's cell and not instead of
+ * it. Minutes from midnight, whole numbers, with `0 <= from < to <= 1440`.
+ */
+export interface DoctorNote {
+  from: number;
+  to: number;
+}
+
 export interface MonthMeta {
   status: 'draft' | 'closed';
   seed?: number;
@@ -101,9 +121,11 @@ export interface MonthMeta {
 }
 
 export interface AppData {
-  schemaVersion: 1;
+  schemaVersion: 2;
   people: Person[];
   settings: Settings;
   cells: Record<ISODate, Record<PersonId, StoredCell>>;
+  /** Doctor's appointments by day and person; a person in it is in `people`. */
+  doctor: Record<ISODate, Record<PersonId, DoctorNote>>;
   months: Record<MonthKey, MonthMeta>;
 }

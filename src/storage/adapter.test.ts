@@ -159,7 +159,7 @@ describe('browserStorage: the cache', () => {
     ['an empty string', ''],
     ['JSON that is not a plan', '[]'],
     ['another app', '{"app":"other"}'],
-    ['a newer version', '{"app":"shift-scheduler","schemaVersion":2}'],
+    ['a newer version', '{"app":"shift-scheduler","schemaVersion":3}'],
     ['a damaged plan', '{"app":"shift-scheduler","schemaVersion":1,"people":[]}'],
   ])('returns null for %s and leaves the stored value alone', (_what, stored) => {
     localStorage.setItem(CACHE_KEY, stored);
@@ -308,7 +308,7 @@ describe('browserStorage with File System Access: openFile', () => {
   it.each([
     ['not a plan', 'Tohle není soubor s plánem směn.', '{'],
     ['from a newer version', 'Soubor je z novější verze aplikace.',
-      '{"app":"shift-scheduler","schemaVersion":2}'],
+      '{"app":"shift-scheduler","schemaVersion":3}'],
     ['damaged', 'Soubor je poškozený.', '{"app":"shift-scheduler","schemaVersion":1}'],
   ])('rejects a file that is %s, and keeps the handle held before', async (_w, message, bad) => {
     const { open } = stubPickers();

@@ -25,6 +25,9 @@ export function defaultSettings(): Settings {
       N12: { min: 1, max: 1 },
     },
     minRestHours: 12,
+    maxDaysInRow: 6,
+    minWeekendShifts: 2,
+    weeklyRestHours: 35,
     maxTwelvePerMonth: 3,
     twelveTarget: 2,
     wishLevels: {
@@ -43,6 +46,7 @@ export function defaultSettings(): Settings {
       W7: 3,
       W8: 3,
       W9: 3,
+      W10: 3,
     },
     dayTypeOverrides: {},
     fairnessWindowMonths: 6,
@@ -65,6 +69,8 @@ export function newPerson(id: PersonId, name: string): Person {
       afterNights: [],
       notes: '',
     },
+    maxTwelve: null,
+    maxNights: null,
     allowance: { DOV: 25, MD: 5 },
     startingCounts: { twelve: 0, nights: 0, holidayTwelve: 0, festive: 0 },
   };
@@ -73,10 +79,11 @@ export function newPerson(id: PersonId, name: string): Person {
 /** An empty plan with eight placeholder operators, ready for the team lead to rename. */
 export function newAppData(): AppData {
   return {
-    schemaVersion: 1,
+    schemaVersion: 2,
     people: Array.from({ length: 8 }, (_, i) => newPerson(`p${i + 1}`, `Operátor ${i + 1}`)),
     settings: defaultSettings(),
     cells: {},
+    doctor: {},
     months: {},
   };
 }

@@ -12,10 +12,14 @@ it('has the score scales and one factor per wish level', () => {
   expect(LEVEL_MULT).toEqual([0, 0.25, 0.5, 1, 2, 4]);
 });
 
-it('weighs all 15 wishes, and the default levels leave the base weights as they are', () => {
+it('weighs all 16 wishes, and the default levels leave the base weights as they are', () => {
   const { wishLevels } = defaultSettings();
   expect(Object.keys(BASE_WEIGHTS).sort()).toEqual(Object.keys(wishLevels).sort());
   expect(effectiveWeights(wishLevels)).toEqual(BASE_WEIGHTS);
+});
+
+it('weighs the doctor wish W10 at 10', () => {
+  expect(BASE_WEIGHTS.W10).toBe(10);
 });
 
 it('turns each level into its factor: off, quarter, half, normal, double, four times', () => {

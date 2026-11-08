@@ -1,7 +1,7 @@
 import { expect, it } from 'vitest';
 import { monthDays } from '../domain/calendar';
 import { defaultSettings } from '../domain/defaults';
-import { MONTH_NAMES, WEEKDAY_ABBREVIATIONS } from './text';
+import { MONTH_NAMES, WEEKDAY_ABBREVIATIONS, WISH_LABELS } from './text';
 
 it('names the twelve months in Czech, January first', () => {
   expect(MONTH_NAMES).toEqual([
@@ -26,4 +26,8 @@ it('abbreviates the weekdays in Czech, Monday first like DayInfo.weekday', () =>
   const [first, , third] = monthDays('2027-01', defaultSettings());
   expect(WEEKDAY_ABBREVIATIONS[first.weekday]).toBe('pá');
   expect(WEEKDAY_ABBREVIATIONS[third.weekday]).toBe('ne');
+});
+
+it('names the doctor wish W10 for the Rules screen', () => {
+  expect(WISH_LABELS.W10).toBe('Směna mimo návštěvu lékaře');
 });

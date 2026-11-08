@@ -27,6 +27,7 @@ export const BASE_WEIGHTS: Record<WishId, number> = {
   W7: 20,
   W8: 10,
   W9: 5,
+  W10: 10,
 };
 
 /** The factor of each wish level, indexed by level: 0 switches the wish off, 5 is the strongest. */

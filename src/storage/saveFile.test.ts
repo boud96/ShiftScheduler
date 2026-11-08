@@ -12,7 +12,8 @@ describe('save file', () => {
   it.each([
     ['{', 'Tohle není soubor s plánem směn.'],
     ['{"app":"other"}', 'Tohle není soubor s plánem směn.'],
-    ['{"app":"shift-scheduler","schemaVersion":2}', 'Soubor je z novější verze aplikace.'],
+    ['{"app":"shift-scheduler","schemaVersion":3}', 'Soubor je z novější verze aplikace.'],
+    ['{"app":"shift-scheduler","schemaVersion":2}', 'Soubor je poškozený.'],
     ['{"app":"shift-scheduler","schemaVersion":1}', 'Soubor je poškozený.'],
   ])('rejects %s', (text, msg) => {
     expect(() => parseSaveFile(text)).toThrow(SaveFileError);
@@ -46,18 +47,35 @@ function samplePlan(): AppData {
   return d;
 }
 
+/**
+ * The sample plan with what version 2 added: doctor's notes (one beside a shift, one on a day of
+ * its own, the shortest and the longest possible) and a personal limit on three people. A limit
+ * of 0 is a limit: no nights, or no 12-hour shifts, at all.
+ */
+function planWithDoctor(): AppData {
+  const d = samplePlan();
+  d.doctor['2027-01-04'] = { p1: { from: 480, to: 720 }, p2: { from: 1439, to: 1440 } };
+  d.doctor['2027-01-19'] = { p3: { from: 0, to: 1440 } };
+  d.doctor['2027-02-10'] = { p1: { from: 0, to: 1 } };
+  d.people[0].maxTwelve = 2;
+  d.people[0].maxNights = 0;
+  d.people[1].maxTwelve = 0;
+  d.people[2].maxNights = 4;
+  return d;
+}
+
 type Raw = Record<string, any>;
 type Edit = (raw: Raw) => void;
 
-/** The sample plan as file text, after `edit` has changed its parsed JSON. */
-function fileWith(edit: Edit): string {
-  const raw: Raw = JSON.parse(serialize(samplePlan()));
+/** A plan (the sample plan unless given) as file text, after `edit` has changed its parsed JSON. */
+function fileWith(edit: Edit, plan: AppData = samplePlan()): string {
+  const raw: Raw = JSON.parse(serialize(plan));
   edit(raw);
   return JSON.stringify(raw);
 }
 
-/** What parseSaveFile makes of the sample plan after `edit`. */
-const parsedWith = (edit: Edit): AppData => parseSaveFile(fileWith(edit));
+/** What parseSaveFile makes of a plan (the sample plan unless given) after `edit`. */
+const parsedWith = (edit: Edit, plan?: AppData): AppData => parseSaveFile(fileWith(edit, plan));
 
 /** The message of the SaveFileError that parsing the text throws. */
 function messageOf(text: string): string {
@@ -70,14 +88,14 @@ function messageOf(text: string): string {
   return 'did not throw';
 }
 
-/** The message of the SaveFileError for the sample plan after `edit`. */
-const errorWith = (edit: Edit): string => messageOf(fileWith(edit));
+/** The message of the SaveFileError for a plan (the sample plan unless given) after `edit`. */
+const errorWith = (edit: Edit, plan?: AppData): string => messageOf(fileWith(edit, plan));
 
 describe('serialize', () => {
   it('writes pretty JSON with the app marker first, then the data', () => {
     const d = samplePlan();
     const text = serialize(d);
-    expect(text.startsWith('{\n  "app": "shift-scheduler",\n  "schemaVersion": 1,\n')).toBe(true);
+    expect(text.startsWith('{\n  "app": "shift-scheduler",\n  "schemaVersion": 2,\n')).toBe(true);
     expect(JSON.parse(text)).toEqual({ app: 'shift-scheduler', ...d });
   });
 });
@@ -101,7 +119,7 @@ describe('parseSaveFile', () => {
   it('drops the app marker and any unknown top-level key', () => {
     const parsed = parsedWith((raw) => { raw.futureThing = { a: 1 }; });
     expect(Object.keys(parsed).sort()).toEqual(
-      ['cells', 'months', 'people', 'schemaVersion', 'settings']);
+      ['cells', 'doctor', 'months', 'people', 'schemaVersion', 'settings']);
     expect(parsed).toEqual(samplePlan());
   });
 
@@ -122,17 +140,17 @@ describe('parseSaveFile', () => {
     });
 
     it('checks the marker before the version', () => {
-      expect(messageOf('{"app":"other","schemaVersion":2}')).toBe(NOT_A_PLAN);
+      expect(messageOf('{"app":"other","schemaVersion":3}')).toBe(NOT_A_PLAN);
     });
   });
 
   describe('schemaVersion', () => {
-    it.each([2, 3, 1.5, 99])('%s is from a newer version', (version) => {
+    it.each([3, 2.5, 99])('%s is from a newer version', (version) => {
       expect(errorWith((raw) => { raw.schemaVersion = version; })).toBe(TOO_NEW);
     });
 
     it('is checked before the rest of the file', () => {
-      const text = '{"app":"shift-scheduler","schemaVersion":2,"people":"nonsense"}';
+      const text = '{"app":"shift-scheduler","schemaVersion":3,"people":"nonsense"}';
       expect(messageOf(text)).toBe(TOO_NEW);
     });
 
@@ -141,6 +159,7 @@ describe('parseSaveFile', () => {
       ['zero', 0],
       ['negative', -1],
       ['not a whole number below 1', 0.5],
+      ['not a whole number between the two versions', 1.5],
       ['a string', '1'],
       ['null', null],
       ['a boolean', true],
@@ -205,6 +224,8 @@ describe('parseSaveFile', () => {
           afterNights: ['R1', 'O'],
           notes: 'Chce volné pondělky.',
         },
+        maxTwelve: 2,
+        maxNights: 4,
         allowance: { DOV: 20, MD: 3 },
         startingCounts: { twelve: 2, nights: 4, holidayTwelve: 1, festive: 3 },
       };
@@ -220,12 +241,13 @@ describe('parseSaveFile', () => {
       expect(parsed).toEqual([defaults()]);
     });
 
-    it.each(['prefs', 'allowance', 'startingCounts', 'activeFrom', 'activeTo'])(
-      'gets the default %s when the file has none', (entry) => {
-        const parsed = peopleWith((raw) => { delete first(raw)[entry]; });
-        expect(parsed[0]).toEqual(parsedWith(() => undefined).people[0]); // the others as they were
-        expect(parsed[0][entry as keyof Person]).toEqual(defaults()[entry as keyof Person]);
-      });
+    it.each([
+      'prefs', 'allowance', 'startingCounts', 'activeFrom', 'activeTo', 'maxTwelve', 'maxNights',
+    ])('gets the default %s when the file has none', (entry) => {
+      const parsed = peopleWith((raw) => { delete first(raw)[entry]; });
+      expect(parsed[0]).toEqual(parsedWith(() => undefined).people[0]); // the others as they were
+      expect(parsed[0][entry as keyof Person]).toEqual(defaults()[entry as keyof Person]);
+    });
 
     it.each([
       ['null', null], ['a number', 7], ['a string', 'normal'], ['an array', []], ['true', true],
@@ -312,8 +334,10 @@ describe('parseSaveFile', () => {
 
     it('drops an entry that the app does not know', () => {
       const parsed = peopleWith((raw) => { first(raw).futureThing = { a: 1 }; });
-      expect(Object.keys(parsed[0]).sort()).toEqual(
-        ['activeFrom', 'activeTo', 'allowance', 'id', 'name', 'prefs', 'startingCounts']);
+      expect(Object.keys(parsed[0]).sort()).toEqual([
+        'activeFrom', 'activeTo', 'allowance', 'id', 'maxNights', 'maxTwelve', 'name', 'prefs',
+        'startingCounts',
+      ]);
     });
 
     it('is not shared between two parses, nor with the defaults', () => {
@@ -540,6 +564,197 @@ describe('parseSaveFile', () => {
         generatedAt: '2027-01-02T10:00:00.000Z',
       });
       expect(parsed.months['2027-02']).toEqual({ status: 'draft', hoursAdjust: { p1: -7.5 } });
+    });
+  });
+});
+
+// Version 2 (Phase 1.1) adds doctor's notes, a personal limit of 12-hour shifts and of nights per
+// person, and three settings. A file that Phase 1 wrote (version 1) must still open, with all of
+// it at the defaults.
+describe('save file version 2', () => {
+  /** Turns the raw JSON of a version 2 file into what Phase 1 wrote: version 1, none of the new. */
+  function asPhase1(raw: Raw): void {
+    raw.schemaVersion = 1;
+    delete raw.doctor;
+    for (const person of raw.people) {
+      delete person.maxTwelve;
+      delete person.maxNights;
+    }
+    for (const key of ['maxDaysInRow', 'minWeekendShifts', 'weeklyRestHours']) {
+      delete raw.settings[key];
+    }
+    delete raw.settings.wishLevels.W10;
+  }
+
+  it('opens a version 1 file with the new fields at their defaults', () => {
+    const text = fileWith((raw) => {
+      raw.settings.minRestHours = 10; // a setting that the file has, and that must stay
+      asPhase1(raw);
+    });
+    // The file is what Phase 1 wrote: none of the new fields is in it.
+    const file: Raw = JSON.parse(text);
+    expect(file.schemaVersion).toBe(1);
+    expect(file).not.toHaveProperty('doctor');
+    expect(file.people[0]).not.toHaveProperty('maxTwelve');
+    expect(file.people[0]).not.toHaveProperty('maxNights');
+    expect(file.settings).not.toHaveProperty('maxDaysInRow');
+    expect(file.settings).not.toHaveProperty('minWeekendShifts');
+    expect(file.settings).not.toHaveProperty('weeklyRestHours');
+    expect(file.settings.wishLevels).not.toHaveProperty('W10');
+
+    const parsed = parseSaveFile(text);
+    expect(parsed.schemaVersion).toBe(2);
+    expect(parsed.doctor).toEqual({});
+    expect(parsed.people).toHaveLength(8);
+    for (const person of parsed.people) {
+      expect(person.maxTwelve).toBeNull();
+      expect(person.maxNights).toBeNull();
+    }
+    expect(parsed.settings.maxDaysInRow).toBe(6);
+    expect(parsed.settings.minWeekendShifts).toBe(2);
+    expect(parsed.settings.weeklyRestHours).toBe(35);
+    expect(parsed.settings.wishLevels.W10).toBe(3);
+    // Everything else is as the file had it.
+    const expected = samplePlan();
+    expected.settings.minRestHours = 10;
+    expect(parsed).toEqual(expected);
+  });
+
+  it('writes version 2 when an opened version 1 file is saved again', () => {
+    const parsed = parseSaveFile(fileWith(asPhase1));
+    const saved = serialize(parsed);
+    expect(JSON.parse(saved).schemaVersion).toBe(2);
+    expect(parseSaveFile(saved)).toEqual(parsed);
+  });
+
+  it('round-trips a version 2 file', () => {
+    const data = planWithDoctor();
+    expect(data.schemaVersion).toBe(2);
+    expect(parseSaveFile(serialize(data))).toEqual(data);
+  });
+
+  it('treats a version 2 file without a doctor entry as one without notes', () => {
+    expect(parsedWith((raw) => { delete raw.doctor; })).toEqual(samplePlan());
+  });
+
+  it('refuses version 3 as from a newer version, whatever else the file holds', () => {
+    expect(errorWith((raw) => { raw.schemaVersion = 3; }, planWithDoctor())).toBe(TOO_NEW);
+    expect(messageOf('{"app":"shift-scheduler","schemaVersion":3}')).toBe(TOO_NEW);
+  });
+
+  describe('doctor notes', () => {
+    /** Replaces the note of p1 on 4 January, which `planWithDoctor` has. */
+    const setNote = (note: unknown): Edit => (raw) => { raw.doctor['2027-01-04'].p1 = note; };
+    /** Adds a note on `date` for p1. */
+    const noteOn = (date: string): Edit => (raw) => {
+      raw.doctor[date] = { p1: { from: 480, to: 720 } };
+    };
+
+    it.each<[string, Edit]>([
+      ['from equal to to', setNote({ from: 600, to: 600 })],
+      ['from after to', setNote({ from: 720, to: 480 })],
+      ['from a fraction', setNote({ from: 480.5, to: 720 })],
+      ['to a fraction', setNote({ from: 480, to: 720.5 })],
+      ['from below 0', setNote({ from: -1, to: 60 })],
+      ['to above 1440', setNote({ from: 1380, to: 1441 })],
+      ['from at 1440 or later', setNote({ from: 1440, to: 1500 })],
+      ['from as text', setNote({ from: '480', to: 720 })],
+      ['to as text', setNote({ from: 480, to: '12:00' })],
+      ['from null', setNote({ from: null, to: 720 })],
+      ['no to', setNote({ from: 480 })],
+      ['no from', setNote({ to: 720 })],
+      ['an empty note', setNote({})],
+      ['a note that is null', setNote(null)],
+      ['a note that is text', setNote('L 8-12')],
+      ['a note that is an array', setNote([480, 720])],
+      ['a note that is a number', setNote(480)],
+      ['an unreal date', noteOn('2027-02-30')],
+      ['a month in place of a date', noteOn('2027-01')],
+      ['a date out of form', noteOn('2027-1-4')],
+      ['a date with a time', noteOn('2027-01-04T00:00')],
+      ['an empty date', noteOn('')],
+      ['a person who is not in the team',
+        (raw) => { raw.doctor['2027-01-04'].p99 = { from: 480, to: 720 }; }],
+      ['a person who was removed from the team',
+        (raw) => { raw.people = raw.people.filter((person: Raw) => person.id !== 'p3'); }],
+      ['a day that is null', (raw) => { raw.doctor['2027-01-05'] = null; }],
+      ['a day that is an array', (raw) => { raw.doctor['2027-01-05'] = []; }],
+      ['a day that is text', (raw) => { raw.doctor['2027-01-05'] = 'p1'; }],
+      ['doctor that is null', (raw) => { raw.doctor = null; }],
+      ['doctor that is an array', (raw) => { raw.doctor = []; }],
+      ['doctor that is text', (raw) => { raw.doctor = 'L 8-12'; }],
+      ['a bad note after good ones on the same day', (raw) => {
+        raw.doctor['2027-03-01'] = {
+          p1: { from: 480, to: 720 }, p2: { from: 510, to: 570 }, p4: { from: 720, to: 480 },
+        };
+      }],
+      ['a bad note on a later day', (raw) => {
+        raw.doctor['2027-03-01'] = { p1: { from: 480, to: 720 } };
+        raw.doctor['2027-03-02'] = { p1: { from: 480, to: 2000 } };
+      }],
+    ])('refuses a broken doctor note: %s', (_what, edit) => {
+      expect(errorWith(edit, planWithDoctor())).toBe(CORRUPT);
+    });
+
+    it('keeps the notes that the file has, the shortest and the longest included', () => {
+      const parsed = parseSaveFile(serialize(planWithDoctor()));
+      expect(parsed.doctor).toEqual({
+        '2027-01-04': { p1: { from: 480, to: 720 }, p2: { from: 1439, to: 1440 } },
+        '2027-01-19': { p3: { from: 0, to: 1440 } },
+        '2027-02-10': { p1: { from: 0, to: 1 } },
+      });
+    });
+
+    it('accepts a day without notes', () => {
+      expect(parsedWith((raw) => { raw.doctor['2027-01-05'] = {}; }, planWithDoctor()).doctor)
+        .toEqual({ ...planWithDoctor().doctor, '2027-01-05': {} });
+    });
+  });
+
+  describe('person limits', () => {
+    /** The first two people after the first is given `value` as both limits, the second 3 and 0. */
+    function limitsWith(value: unknown): Person[] {
+      return parsedWith((raw) => {
+        raw.people[0].maxTwelve = value;
+        raw.people[0].maxNights = value;
+        raw.people[1].maxTwelve = 3;
+        raw.people[1].maxNights = 0;
+      }).people;
+    }
+
+    it.each([
+      ['text', 'x'],
+      ['a number as text', '3'],
+      ['true', true],
+      ['an array', [3]],
+      ['an object', { max: 3 }],
+    ])('takes a wrong-typed person limit as null: %s', (_what, value) => {
+      const [first, second] = limitsWith(value);
+      expect(first.maxTwelve).toBeNull();
+      expect(first.maxNights).toBeNull();
+      expect(first).toEqual(newPerson('p1', 'Operátor 1')); // the rest of the person is as it was
+      expect([second.maxTwelve, second.maxNights]).toEqual([3, 0]); // the next one is not hit
+    });
+
+    it.each([
+      ['negative', -1],
+      ['not a whole number', 2.5],
+    ])('takes a limit that is %s as null', (_what, value) => {
+      const [first] = limitsWith(value);
+      expect([first.maxTwelve, first.maxNights]).toEqual([null, null]);
+    });
+
+    it('keeps a limit of 0: no nights, or no 12-hour shifts, at all', () => {
+      const [first] = limitsWith(0);
+      expect([first.maxTwelve, first.maxNights]).toEqual([0, 0]);
+    });
+
+    it('takes a limit that the file lacks as null, and keeps the other limit of the person', () => {
+      const [first] = parsedWith(
+        (raw) => { delete raw.people[0].maxTwelve; },
+        planWithDoctor(),
+      ).people;
+      expect([first.maxTwelve, first.maxNights]).toEqual([null, 0]); // it was [2, 0]
     });
   });
 });

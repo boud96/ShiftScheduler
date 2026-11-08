@@ -196,6 +196,7 @@ export const WISH_LABELS: Record<WishId, string> = {
   W7: 'Férovost napříč měsíci',
   W8: 'Neoblíbené směny rovnoměrně',
   W9: 'Vyrovnané dny (R2)',
+  W10: 'Směna mimo návštěvu lékaře',
 };
 
 /** An option of a select, and the value that it stands for. */
