@@ -654,3 +654,40 @@ describe('exchange', () => {
     expect(st.rows).toEqual(rows);
   });
 });
+
+describe('construct', () => {
+  it('leaves a shift that two people can take to the days in order, which take the better', () => {
+    // Everyone but D and G has asked for Saturday 13 February off, so only D or G can work the
+    // night of Friday 12 February, which ends that morning. D likes nights; G never works them.
+    const d = newAppData();
+    d.people = syntheticTeam();
+    d.cells['2027-02-13'] = Object.fromEntries(
+      ['A', 'B', 'C', 'E', 'F', 'H'].map((id) => [id, { code: 'x' as const }]),
+    );
+    const g = buildMonthGrid(d, '2027-02');
+    const st = new SearchState(g.ctx, g.rows, g.fixed);
+    construct(st, mulberry32(1));
+    const friday = g.ctx.days.findIndex((day) => day.date === '2027-02-12');
+    expect(st.rows[g.personIds.indexOf('D')][friday]).toBe(Code.N);
+    expect(evaluateMonth(g.ctx, st.rows, true).findings.filter((f) => f.rule === 'S1')).toEqual([]);
+  });
+
+  it('first gives a shift that only one person can take to that person', () => {
+    // Everyone but H has asked for 13 and 14 February off, so only H can work those days, and only
+    // H the night of Friday 12 February, which ends on the morning of the 13th. Taken first, that
+    // night leaves H the nights of the weekend, N12 after N: just its two R12 stay uncovered.
+    const { data, month } = scenario('impossible');
+    const g = buildMonthGrid(data, month);
+    const st = new SearchState(g.ctx, g.rows, g.fixed);
+    construct(st, mulberry32(1));
+    const h = g.personIds.indexOf('H');
+    const at = (date: string) => g.ctx.days.findIndex((day) => day.date === date);
+    const dates = ['2027-02-12', '2027-02-13', '2027-02-14'];
+    expect(dates.map((date) => st.rows[h][at(date)])).toEqual([Code.N, Code.N12, Code.N12]);
+    const gaps = evaluateMonth(g.ctx, st.rows, true).findings.filter((f) => f.rule === 'M1');
+    expect(gaps.map((f) => `${g.ctx.days[f.days[0]].date} ${f.message}`)).toEqual([
+      '2027-02-13 chybí R12',
+      '2027-02-14 chybí R12',
+    ]);
+  });
+});

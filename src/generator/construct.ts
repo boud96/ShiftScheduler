@@ -39,6 +39,51 @@ function makeBest(st: SearchState, rnd: () => number, moves: Move[]): boolean {
 }
 
 /**
+ * The shift that the coverage asks for on a day of the month and that just one person can take
+ * without breaking a must, the earliest such day first; null if there is none. A shift that no
+ * one can take is passed over.
+ */
+function forcedShift(st: SearchState): Move | null {
+  const { ctx, rows, fixed } = st;
+  for (let d = ctx.first; d < ctx.days.length; d++) {
+    const slots = st.weekdayType[d] === 1 ? WEEKDAY_SLOTS : TWELVE_SLOTS;
+    for (const code of slots) {
+      const { min } = ctx.settings.coverage[CODE_NAMES[code] as ShiftName];
+      let count = 0;
+      for (const row of rows) if (row[d] === code) count++;
+      if (count >= min) continue;
+      let only: Move | null = null;
+      let takers = 0;
+      for (let p = 0; p < rows.length && takers < 2; p++) {
+        if (fixed[p][d] !== 0 || rows[p][d] !== Code.EMPTY) continue;
+        const move: Move = { kind: 'set', p, d, code };
+        const delta = st.tryMove(move);
+        st.revert();
+        if (delta < BREAKS_A_MUST) {
+          takers++;
+          only = move;
+        }
+      }
+      if (takers === 1) return only;
+    }
+  }
+  return null;
+}
+
+/**
+ * While some shift that a day lacks can be taken by one person only, that person takes it. Such a
+ * shift is left uncovered if anyone else takes the cells it needs first: on a weekend that only one
+ * person may work, a night on the Friday before it ends on the Saturday morning, so if that person
+ * took the Saturday's day shift, the night would stay uncovered.
+ */
+function coverForced(st: SearchState): void {
+  for (let move = forcedShift(st); move !== null; move = forcedShift(st)) {
+    st.tryMove(move);
+    st.commit();
+  }
+}
+
+/**
  * Each day of the month in order: every shift that the coverage asks for and the day lacks, from
  * the people whose cell is free and empty. A shift no one can take is left uncovered.
  */
@@ -86,17 +131,20 @@ function reachFpd(st: SearchState, rnd: () => number): void {
 /**
  * Builds the first draft of a month greedily, as the start of the search.
  *
- * 1. Each day of the month in order, it fills every shift the coverage asks for and the day does
+ * 1. While some shift that the coverage asks for can be taken by one person only, without
+ *    breaking a must, that person takes it, the earliest such day first.
+ * 2. Each day of the month in order, it fills every shift the coverage asks for and the day does
  *    not have yet: R1, O20, O, N and R2 on a weekday, R12 and N12 on a 12-hour day. Each time it
  *    takes, of the people whose cell is free and empty, the one whose shift lowers the score the
  *    most; `rnd` breaks a tie.
- * 2. While someone is below their FPD, it adds an R2 on a free and empty weekday, where it lowers
+ * 3. While someone is below their FPD, it adds an R2 on a free and empty weekday, where it lowers
  *    the score the most.
  *
  * It never makes a move that breaks a must (that costs HARD): a shift that no one can take
  * without breaking one is left uncovered, and someone who can be given no R2 stays below FPD.
  */
 export function construct(st: SearchState, rnd: () => number): void {
+  coverForced(st);
   coverDays(st, rnd);
   reachFpd(st, rnd);
 }
