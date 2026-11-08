@@ -2,7 +2,7 @@ import { useRef } from 'react';
 import type { DayInfo } from '../../domain/calendar';
 import { CODE_NAMES, Code, WEEKDAY_CODES, isShift } from '../../domain/codes';
 import type { MonthContext, MonthGrid } from '../../domain/context';
-import { fmtH, shortDate } from '../../domain/format';
+import { clock, fmtH, shortDate } from '../../domain/format';
 import type { MonthEval } from '../../domain/rules/evaluate';
 import { FPD_TOLERANCE } from '../../domain/rules/personMusts';
 import type { Finding, PersonStats } from '../../domain/rules/types';
@@ -74,6 +74,8 @@ interface GridProps {
   names: readonly string[];
   /** What is stored: a pin is not part of the grid's rows. */
   cells: AppData['cells'];
+  /** The doctor's notes: a note sits beside a cell and is not part of the grid's rows either. */
+  doctor: AppData['doctor'];
   marks: Marks;
   /** The selected cell, and whether its menu is open. */
   selected: CellRef | null;
@@ -88,12 +90,13 @@ interface GridProps {
 /**
  * The people and the days of the month as a table: a row for each person and a column for each
  * day, the last days of the previous month first. Each cell is a button that opens its menu. A
- * cell with a red outline is part of a broken must, one with an amber outline of the finding that
- * is selected in Kontrola. The totals of a person follow their row, and under the rows is the
- * coverage of each day. The name cell of a person holds a button that copies their row.
+ * cell with a doctor's note has a small `L`, and the time of the note in its title. A cell with a
+ * red outline is part of a broken must, one with an amber outline of the finding that is selected
+ * in Kontrola. The totals of a person follow their row, and under the rows is the coverage of
+ * each day. The name cell of a person holds a button that copies their row.
  */
 export function Grid(props: GridProps) {
-  const { grid, evaluation, names, cells, marks, selected, menuOpen } = props;
+  const { grid, evaluation, names, cells, doctor, marks, selected, menuOpen } = props;
   const { onCell, onChoose, onCloseMenu, onCopyRow } = props;
   const { ctx } = grid;
   const problems = problemsOf(evaluation.findings);
@@ -116,7 +119,12 @@ export function Grid(props: GridProps) {
     const here = isSelected(personId, day.date);
     const open = here && menuOpen;
     const id = cellId(p, i);
-    const title = `${names[p]} · ${shortDate(day.date)}`;
+    const note = doctor[day.date]?.[personId];
+    const name = `${names[p]} · ${shortDate(day.date)}`;
+    const title =
+      note === undefined
+        ? name
+        : `${name} · ${MONTH_SCREEN.doctor.title(clock(note.from), clock(note.to))}`;
     return (
       <td key={day.date}>
         <button
@@ -139,13 +147,17 @@ export function Grid(props: GridProps) {
         >
           {code === Code.EMPTY ? null : CODE_NAMES[code]}
           {pinned && <span className="month-pin">{MONTH_SCREEN.pinned}</span>}
+          {note !== undefined && (
+            <span className="month-doctor-marker">{MONTH_SCREEN.doctor.marker}</span>
+          )}
         </button>
         {open && (
           <CellMenu
             anchor={anchor}
-            label={title}
+            label={name}
             dayType={day.dayType}
             pin={isShift(code) ? (pinned ? 'unpin' : 'pin') : null}
+            doctor={note ?? null}
             onChoose={onChoose}
             onClose={closeMenu}
           />

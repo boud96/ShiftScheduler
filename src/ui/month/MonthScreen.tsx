@@ -33,6 +33,7 @@ function defaultMonth(): MonthKey {
 /** The month as the screen shows it: the grid made of the data, and what the rules say of it. */
 interface MonthView {
   cells: AppData['cells'];
+  doctor: AppData['doctor'];
   grid: MonthGrid;
   evaluation: MonthEval;
   /** The name of each person of the grid, in its order. */
@@ -53,6 +54,7 @@ function buildView(data: AppData, month: MonthKey): MonthView {
   const fpd = fmtH(fpdForMonth(month, data.settings));
   return {
     cells: data.cells,
+    doctor: data.doctor,
     grid,
     evaluation,
     names,
@@ -211,6 +213,10 @@ export function MonthScreen({ initialMonth }: MonthScreenProps) {
       dispatch({ type: 'togglePin', date, personId });
       return;
     }
+    if (choice.type === 'doctor') {
+      dispatch({ type: 'setDoctor', date, personId, note: choice.note });
+      return;
+    }
     const cell = choice.type === 'clear' ? null : storedCell(choice.code);
     dispatch({ type: 'setCell', date, personId, cell });
   };
@@ -287,6 +293,7 @@ export function MonthScreen({ initialMonth }: MonthScreenProps) {
         evaluation={view.evaluation}
         names={view.names}
         cells={view.cells}
+        doctor={view.doctor}
         marks={marks}
         selected={selected}
         menuOpen={menuOpen}

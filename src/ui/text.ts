@@ -120,8 +120,21 @@ export const MONTH_SCREEN = {
   covered: '✓',
   /** The columns of the totals of a person. */
   totals: { hours: 'Hodiny / FPD', overtime: 'Přesčas', twelve: '12h', nights: 'Noci' },
-  menu: { clear: 'Vymazat', pin: 'Připnout', unpin: 'Odepnout' },
+  menu: { clear: 'Vymazat', pin: 'Připnout', unpin: 'Odepnout', doctor: 'Lékař…' },
   pinned: '📌',
+  /** A doctor's appointment (code L): the marker in a cell, and the form that the menu opens. */
+  doctor: {
+    marker: 'L',
+    /** What the title of a cell appends for a note; `from` and `to` are times as `H:MM`. */
+    title: (from: string, to: string): string => `lékař ${from}–${to}`,
+    from: 'od',
+    to: 'do',
+    save: 'Uložit lékaře',
+    remove: 'Odebrat lékaře',
+    /** Above the buttons, when the times cannot be stored. */
+    missing: 'Vyplňte čas od i čas do.',
+    order: 'Čas od musí být dřív než čas do.',
+  },
   checks: 'Kontrola',
   summary: (musts: number, wishes: number): string => `Musí: ${musts} · Přání: ${wishes}`,
   /** The generator's controls in the head: the button, the time spent, and how a run ended. */

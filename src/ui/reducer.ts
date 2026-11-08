@@ -3,6 +3,7 @@ import { applyRows, buildMonthGrid } from '../domain/context';
 import { newPerson } from '../domain/defaults';
 import type {
   AppData,
+  DoctorNote,
   ISODate,
   MonthKey,
   MonthMeta,
@@ -21,6 +22,12 @@ import type { PastePlan } from '../clipboard/tsv';
 export type Action =
   | { type: 'load'; data: AppData }
   | { type: 'setCell'; date: ISODate; personId: PersonId; cell: StoredCell | null }
+  /**
+   * Stores the doctor's note of a person on a day beside the day's cell, which it does not touch;
+   * null deletes the note. A person who is not in the team, and a note that is not a time span of
+   * one day, are ignored: the save file is refused with either.
+   */
+  | { type: 'setDoctor'; date: ISODate; personId: PersonId; note: DoctorNote | null }
   /** Pins a shift, or unpins a pinned one. Any other cell is left as it is. */
   | { type: 'togglePin'; date: ISODate; personId: PersonId }
   | { type: 'applyPaste'; plan: PastePlan }
@@ -51,22 +58,69 @@ function without<T>(record: Record<string, T>, key: string): Record<string, T> {
   return rest;
 }
 
+/** What is kept for each person on each day: the cells and the doctor's notes. */
+type ByDay<T> = Record<ISODate, Record<PersonId, T>>;
+
+/**
+ * The record with `value` stored for the person on the date. Null removes it, and the day with it
+ * when it was the last one there; the same record comes back when there was nothing to remove.
+ */
+function putByDay<T>(
+  record: ByDay<T>,
+  date: ISODate,
+  personId: PersonId,
+  value: T | null,
+): ByDay<T> {
+  const day = record[date];
+  if (value === null) {
+    if (day === undefined || !Object.hasOwn(day, personId)) return record;
+    const rest = without(day, personId);
+    const next = { ...record };
+    if (Object.keys(rest).length > 0) next[date] = rest;
+    else delete next[date];
+    return next;
+  }
+  return { ...record, [date]: { ...day, [personId]: value } };
+}
+
+/** The record without the person, and without the days that held nobody else. */
+function withoutPerson<T>(record: ByDay<T>, personId: PersonId): ByDay<T> {
+  const rest: ByDay<T> = {};
+  for (const [date, day] of Object.entries(record)) {
+    if (!Object.hasOwn(day, personId)) rest[date] = day;
+    else if (Object.keys(day).length > 1) rest[date] = without(day, personId);
+  }
+  return rest;
+}
+
 function setCell(
   data: AppData,
   date: ISODate,
   personId: PersonId,
   cell: StoredCell | null,
 ): AppData {
-  const day = data.cells[date];
-  if (cell === null) {
-    if (day === undefined || !Object.hasOwn(day, personId)) return data;
-    const rest = without(day, personId);
-    const cells = { ...data.cells };
-    if (Object.keys(rest).length > 0) cells[date] = rest;
-    else delete cells[date];
-    return { ...data, cells };
+  const cells = putByDay(data.cells, date, personId, cell);
+  return cells === data.cells ? data : { ...data, cells };
+}
+
+/** Whether the note is a stretch of one day in whole minutes: `0 <= from < to <= 1440`. */
+function isTimeSpan({ from, to }: DoctorNote): boolean {
+  return Number.isInteger(from) && Number.isInteger(to) && from >= 0 && from < to && to <= 1440;
+}
+
+function setDoctor(
+  data: AppData,
+  date: ISODate,
+  personId: PersonId,
+  note: DoctorNote | null,
+): AppData {
+  // The save file is refused with a note for someone who is not in the team, or a note that is no
+  // time span (see `parseSaveFile`), so neither is stored.
+  if (note !== null && !(isTimeSpan(note) && data.people.some((p) => p.id === personId))) {
+    return data;
   }
-  return { ...data, cells: { ...data.cells, [date]: { ...day, [personId]: cell } } };
+  const doctor = putByDay(data.doctor, date, personId, note);
+  return doctor === data.doctor ? data : { ...data, doctor };
 }
 
 function togglePin(data: AppData, date: ISODate, personId: PersonId): AppData {
@@ -118,17 +172,23 @@ function dropAdjustment(meta: MonthMeta, personId: PersonId): MonthMeta {
   return { ...meta, hoursAdjust: without(meta.hoursAdjust, personId) };
 }
 
+/**
+ * The team without the person, and without what is kept for them: their cells, their doctor's
+ * notes and their hours adjustments. The save file is refused with a note for someone who is not in
+ * the team, so the notes must go with the person.
+ */
 function removePerson(data: AppData, personId: PersonId): AppData {
   if (!data.people.some((p) => p.id === personId)) return data;
-  const cells: AppData['cells'] = {};
-  for (const [date, day] of Object.entries(data.cells)) {
-    if (!Object.hasOwn(day, personId)) cells[date] = day;
-    else if (Object.keys(day).length > 1) cells[date] = without(day, personId);
-  }
   const months = Object.fromEntries(
     Object.entries(data.months).map(([month, meta]) => [month, dropAdjustment(meta, personId)]),
   );
-  return { ...data, people: data.people.filter((p) => p.id !== personId), cells, months };
+  return {
+    ...data,
+    people: data.people.filter((p) => p.id !== personId),
+    cells: withoutPerson(data.cells, personId),
+    doctor: withoutPerson(data.doctor, personId),
+    months,
+  };
 }
 
 function movePerson(data: AppData, personId: PersonId, delta: -1 | 1): AppData {
@@ -151,6 +211,8 @@ export function reduce(data: AppData, a: Action): AppData {
       return a.data;
     case 'setCell':
       return setCell(data, a.date, a.personId, a.cell);
+    case 'setDoctor':
+      return setDoctor(data, a.date, a.personId, a.note);
     case 'togglePin':
       return togglePin(data, a.date, a.personId);
     case 'applyPaste':

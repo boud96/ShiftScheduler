@@ -79,6 +79,11 @@ function put(data: AppData, date: ISODate, person: PersonId, code: CodeName, pin
   (data.cells[date] ??= {})[person] = pinned ? { code, pinned } : { code };
 }
 
+/** Stores a doctor's note for `person` on `date`, in minutes from midnight. */
+function putNote(data: AppData, date: ISODate, person: PersonId, from: number, to: number) {
+  (data.doctor[date] ??= {})[person] = { from, to };
+}
+
 function renderMonth(data: AppData = plan(), month: MonthKey = '2027-01') {
   return render(
     <AppProvider storage={memoryStorage(data)} runner={inProcessRunner}>
@@ -92,6 +97,8 @@ const MONDAY = '2027-01-04';
 
 const cell = (person: PersonId, date: ISODate) => screen.getByTestId(`cell-${person}-${date}`);
 const stored = (date: ISODate, person: PersonId) => (app.data as AppData).cells[date]?.[person];
+const storedNote = (date: ISODate, person: PersonId) =>
+  (app.data as AppData).doctor[date]?.[person];
 const menu = () => screen.getByRole('menu');
 const item = (name: string) => screen.getByRole('menuitem', { name });
 const itemNames = () => within(menu()).getAllByRole('menuitem').map((i) => i.textContent);
@@ -377,18 +384,18 @@ describe('the grid', () => {
 // --- The cell menu ----------------------------------------------------------------------------
 
 describe('the cell menu', () => {
-  it('offers the weekday shifts on a weekday, then the absences, x and Vymazat', async () => {
+  it('offers the weekday shifts, then the absences, x, Lékař… and Vymazat', async () => {
     renderMonth(plan(2));
     await userEvent.click(cell('A', MONDAY));
     expect(menu()).toBeInTheDocument();
     expect(itemNames()).toEqual(
-      ['R1', 'R2', 'O20', 'O', 'N', 'DOV', 'MD', 'OP', 'NEM', 'x', 'Vymazat'],
+      ['R1', 'R2', 'O20', 'O', 'N', 'DOV', 'MD', 'OP', 'NEM', 'x', 'Lékař…', 'Vymazat'],
     );
   });
 
   it('offers the 12-hour shifts on a weekend and on a holiday', async () => {
     renderMonth(plan(2));
-    const twelve = ['R12', 'N12', 'DOV', 'MD', 'OP', 'NEM', 'x', 'Vymazat'];
+    const twelve = ['R12', 'N12', 'DOV', 'MD', 'OP', 'NEM', 'x', 'Lékař…', 'Vymazat'];
     await userEvent.click(cell('A', '2027-01-09')); // a Saturday
     expect(itemNames()).toEqual(twelve);
     await userEvent.click(cell('A', '2027-01-01')); // a holiday on a Friday
@@ -667,6 +674,317 @@ describe('the cell menu', () => {
   });
 });
 
+// --- The doctor's note: the menu and the grid ---------------------------------------------------
+
+describe("the doctor's note", () => {
+  const dialog = () => screen.getByRole('dialog');
+  const fromBox = () => screen.getByLabelText('od');
+  const toBox = () => screen.getByLabelText('do');
+  const button = (name: string) => screen.getByRole('button', { name });
+  const noButton = (name: string) => screen.queryByRole('button', { name });
+
+  /** Opens the menu of a cell, chooses `Lékař…`, and so opens the form of the note. */
+  async function openForm(person: PersonId, date: ISODate) {
+    await userEvent.click(cell(person, date));
+    await userEvent.click(item('Lékař…'));
+  }
+
+  /** Types the two times, as `HH:MM`, into the form. */
+  async function typeTimes(from: string, to: string) {
+    await userEvent.type(fromBox(), from);
+    await userEvent.type(toBox(), to);
+  }
+
+  it("the menu stores a doctor's note", async () => {
+    renderMonth(plan(2));
+    await openForm('A', MONDAY);
+    await typeTimes('08:00', '12:00');
+    await userEvent.click(button('Uložit lékaře'));
+
+    expect(storedNote(MONDAY, 'A')).toStrictEqual({ from: 480, to: 720 });
+    expect(cell('A', MONDAY)).toHaveTextContent(/^L$/);
+    expect(cell('A', MONDAY).title).toContain('lékař 8:00–12:00');
+    expect(stored(MONDAY, 'A')).toBeUndefined(); // a note is no code: the cell holds none
+    expect(screen.queryByRole('dialog')).toBeNull();
+    expect(screen.queryByRole('menu')).toBeNull();
+    expect(cell('A', MONDAY)).toHaveFocus();
+    expect(cell('B', MONDAY)).toBeEmptyDOMElement(); // nobody else is touched
+  });
+
+  it('a note and a shift share a cell', () => {
+    const data = plan(2);
+    put(data, MONDAY, 'A', 'R1', true);
+    putNote(data, MONDAY, 'A', 480, 720);
+    renderMonth(data);
+    expect(cell('A', MONDAY)).toHaveTextContent('R1');
+    expect(cell('A', MONDAY)).toHaveTextContent('📌');
+    expect(within(cell('A', MONDAY)).getByText('L')).toBeInTheDocument();
+    expect(cell('A', MONDAY)).toHaveAttribute('data-code', 'R1'); // painted as the shift
+    expect(cell('A', MONDAY).title).toContain('lékař 8:00–12:00');
+    expect(cell('B', MONDAY)).toBeEmptyDOMElement();
+  });
+
+  it('keeps the shift and its pin when a note is stored beside it', async () => {
+    const data = plan(2);
+    put(data, MONDAY, 'A', 'R1', true);
+    renderMonth(data);
+    await openForm('A', MONDAY);
+    await typeTimes('13:30', '15:00');
+    await userEvent.click(button('Uložit lékaře'));
+    expect(stored(MONDAY, 'A')).toStrictEqual({ code: 'R1', pinned: true });
+    expect(storedNote(MONDAY, 'A')).toStrictEqual({ from: 810, to: 900 });
+    expect(cell('A', MONDAY)).toHaveTextContent('R1');
+    expect(cell('A', MONDAY)).toHaveTextContent('L');
+  });
+
+  it('appends the note to the title of the cell, and names the menu by the day alone', async () => {
+    const data = plan(2);
+    putNote(data, MONDAY, 'B', 570, 645);
+    renderMonth(data);
+    expect(cell('B', MONDAY)).toHaveAttribute('title', 'Operátor B · 4. 1. · lékař 9:30–10:45');
+    expect(cell('A', MONDAY)).toHaveAttribute('title', 'Operátor A · 4. 1.'); // no note, no change
+    await userEvent.click(cell('B', MONDAY));
+    expect(screen.getByRole('menu', { name: 'Operátor B · 4. 1.' })).toBeInTheDocument();
+  });
+
+  it('shows the marker on an empty cell, an absence and a day outside the team', () => {
+    const data = plan(2);
+    data.people[1].activeFrom = '2027-01-10';
+    put(data, '2027-01-05', 'A', 'DOV');
+    putNote(data, '2027-01-05', 'A', 480, 720);
+    putNote(data, '2027-01-09', 'B', 480, 720); // B joins the next day
+    putNote(data, '2026-12-31', 'A', 480, 720); // a day of the tail
+    renderMonth(data);
+    expect(cell('A', '2027-01-05')).toHaveTextContent(/^DOVL$/);
+    expect(cell('B', '2027-01-09')).toHaveTextContent(/^L$/);
+    expect(cell('A', '2026-12-31')).toHaveTextContent(/^L$/);
+    expect(cell('A', '2027-01-06')).toBeEmptyDOMElement();
+  });
+
+  it('opens a form named by the person and the day, with the focus on the first time', async () => {
+    renderMonth(plan(2));
+    await openForm('A', MONDAY);
+    expect(screen.getByRole('dialog', { name: 'Operátor A · 4. 1.' })).toBeInTheDocument();
+    expect(screen.queryByRole('menu')).toBeNull(); // the list of codes gives way to the form
+    expect(fromBox()).toHaveAttribute('type', 'time');
+    expect(toBox()).toHaveAttribute('type', 'time');
+    expect(fromBox()).toHaveFocus();
+    expect(fromBox()).toHaveValue('');
+    expect(toBox()).toHaveValue('');
+    expect(button('Uložit lékaře')).toBeInTheDocument();
+    expect(noButton('Odebrat lékaře')).toBeNull(); // there is no note to remove
+  });
+
+  it('shows the times of the note that is there, and changes it', async () => {
+    const data = plan(2);
+    putNote(data, MONDAY, 'A', 480, 720);
+    renderMonth(data);
+    await openForm('A', MONDAY);
+    expect(fromBox()).toHaveValue('08:00');
+    expect(toBox()).toHaveValue('12:00');
+    await userEvent.clear(fromBox());
+    await userEvent.type(fromBox(), '09:15');
+    await userEvent.click(button('Uložit lékaře'));
+    expect(storedNote(MONDAY, 'A')).toStrictEqual({ from: 555, to: 720 });
+    expect(cell('A', MONDAY).title).toContain('lékař 9:15–12:00');
+  });
+
+  it('removes the note with Odebrat lékaře, and leaves the shift', async () => {
+    const data = plan(2);
+    put(data, MONDAY, 'A', 'R2');
+    putNote(data, MONDAY, 'A', 480, 720);
+    putNote(data, MONDAY, 'B', 480, 720);
+    renderMonth(data);
+    await openForm('A', MONDAY);
+    await userEvent.click(button('Odebrat lékaře'));
+    expect(storedNote(MONDAY, 'A')).toBeUndefined();
+    expect(storedNote(MONDAY, 'B')).toStrictEqual({ from: 480, to: 720 });
+    expect(stored(MONDAY, 'A')).toStrictEqual({ code: 'R2' });
+    expect(cell('A', MONDAY)).toHaveTextContent(/^R2$/);
+    expect(cell('A', MONDAY).title).toBe('Operátor A · 4. 1.');
+    expect(screen.queryByRole('dialog')).toBeNull();
+  });
+
+  it('leaves the note when the cell is cleared with Vymazat', async () => {
+    const data = plan(2);
+    put(data, MONDAY, 'A', 'R1', true);
+    putNote(data, MONDAY, 'A', 480, 720);
+    renderMonth(data);
+    await choose('A', MONDAY, 'Vymazat');
+    expect(stored(MONDAY, 'A')).toBeUndefined();
+    expect(storedNote(MONDAY, 'A')).toStrictEqual({ from: 480, to: 720 });
+    expect(cell('A', MONDAY)).toHaveTextContent(/^L$/);
+  });
+
+  it.each([
+    ['ends before it starts', '12:00', '08:00'],
+    ['ends where it starts', '10:00', '10:00'],
+  ])('refuses a note that %s, says why, and stores nothing', async (_what, from, to) => {
+    renderMonth(plan(2));
+    await openForm('A', MONDAY);
+    await typeTimes(from, to);
+    await userEvent.click(button('Uložit lékaře'));
+    expect(screen.getByRole('alert')).toHaveTextContent('Čas od musí být dřív než čas do.');
+    expect(storedNote(MONDAY, 'A')).toBeUndefined();
+    expect(dialog()).toBeInTheDocument(); // the form stays, with what was typed
+    expect(fromBox()).toHaveValue(from);
+    expect(toBox()).toHaveValue(to);
+
+    // The message goes with the next change, and a note that is right is stored.
+    await userEvent.clear(toBox());
+    expect(screen.queryByRole('alert')).toBeNull();
+    await userEvent.type(toBox(), '23:59');
+    await userEvent.click(button('Uložit lékaře'));
+    expect(storedNote(MONDAY, 'A')).toStrictEqual({
+      from: Number(from.slice(0, 2)) * 60,
+      to: 1439,
+    });
+  });
+
+  it.each([
+    ['both times', '', ''],
+    ['the start', '', '12:00'],
+    ['the end', '08:00', ''],
+  ])('asks for the times when %s is missing', async (_what, from, to) => {
+    renderMonth(plan(2));
+    await openForm('A', MONDAY);
+    if (from !== '') await userEvent.type(fromBox(), from);
+    if (to !== '') await userEvent.type(toBox(), to);
+    await userEvent.click(button('Uložit lékaře'));
+    expect(screen.getByRole('alert')).toHaveTextContent('Vyplňte čas od i čas do.');
+    expect(storedNote(MONDAY, 'A')).toBeUndefined();
+    expect(dialog()).toBeInTheDocument();
+  });
+
+  it('stores the note on Enter in a box, like the button', async () => {
+    renderMonth(plan(2));
+    await openForm('A', MONDAY);
+    await typeTimes('06:00', '07:30');
+    await userEvent.keyboard('{Enter}');
+    expect(storedNote(MONDAY, 'A')).toStrictEqual({ from: 360, to: 450 });
+    expect(screen.queryByRole('dialog')).toBeNull();
+  });
+
+  it('shows the end of the day, which a time box cannot hold, as 23:59', async () => {
+    const data = plan(2);
+    putNote(data, MONDAY, 'A', 1320, 1440);
+    renderMonth(data);
+    expect(cell('A', MONDAY).title).toContain('lékař 22:00–24:00');
+    await openForm('A', MONDAY);
+    expect(fromBox()).toHaveValue('22:00');
+    expect(toBox()).toHaveValue('23:59');
+  });
+
+  it('closes on Escape without storing, and gives the focus back to the cell', async () => {
+    renderMonth(plan(2));
+    await openForm('A', MONDAY);
+    await typeTimes('08:00', '12:00');
+    await userEvent.keyboard('{Escape}');
+    expect(screen.queryByRole('dialog')).toBeNull();
+    expect(storedNote(MONDAY, 'A')).toBeUndefined();
+    expect(cell('A', MONDAY)).toHaveFocus();
+  });
+
+  it('lets Tab go from control to control, and leaves at either end as the list does', async () => {
+    const data = plan(2);
+    putNote(data, MONDAY, 'A', 480, 720);
+    renderMonth(data);
+    await openForm('A', MONDAY);
+    expect(fromBox()).toHaveFocus();
+    await userEvent.tab();
+    expect(toBox()).toHaveFocus();
+    await userEvent.tab();
+    expect(button('Uložit lékaře')).toHaveFocus();
+    await userEvent.tab();
+    expect(button('Odebrat lékaře')).toHaveFocus();
+    expect(dialog()).toBeInTheDocument();
+    await userEvent.tab(); // past the last control: the form closes, the cell has the focus
+    expect(screen.queryByRole('dialog')).toBeNull();
+    expect(cell('A', MONDAY)).toHaveFocus();
+
+    await openForm('A', MONDAY);
+    await userEvent.tab({ shift: true }); // before the first control
+    expect(screen.queryByRole('dialog')).toBeNull();
+    expect(cell('A', MONDAY)).toHaveFocus();
+  });
+
+  it('closes on a click outside', async () => {
+    renderMonth(plan(2));
+    await openForm('A', MONDAY);
+    await userEvent.click(document.body);
+    expect(screen.queryByRole('dialog')).toBeNull();
+    expect(storedNote(MONDAY, 'A')).toBeUndefined();
+  });
+
+  it('stays open for a click inside it', async () => {
+    renderMonth(plan(2));
+    await openForm('A', MONDAY);
+    await userEvent.click(dialog());
+    await userEvent.click(fromBox());
+    expect(dialog()).toBeInTheDocument();
+  });
+
+  it('starts from the list of codes each time the menu opens', async () => {
+    renderMonth(plan(2));
+    await openForm('A', MONDAY);
+    await userEvent.keyboard('{Escape}');
+    await userEvent.click(cell('A', MONDAY));
+    expect(menu()).toBeInTheDocument();
+    expect(screen.queryByRole('dialog')).toBeNull();
+  });
+
+  it('stores a note on a day of the tail, as it does a shift', async () => {
+    renderMonth(plan(2));
+    await openForm('A', '2026-12-31');
+    await typeTimes('08:00', '12:00');
+    await userEvent.click(button('Uložit lékaře'));
+    expect(storedNote('2026-12-31', 'A')).toStrictEqual({ from: 480, to: 720 });
+    expect(cell('A', '2026-12-31')).toHaveTextContent('L');
+  });
+
+  it('is not left open for a person who is gone, and their note goes with them', async () => {
+    const data = plan(3);
+    putNote(data, MONDAY, 'C', 480, 720);
+    renderMonth(data);
+    await openForm('C', MONDAY);
+    act(() => app.dispatch({ type: 'removePerson', personId: 'C' }));
+    expect(screen.queryByRole('dialog')).toBeNull();
+    expect(screen.queryByTestId(`cell-C-${MONDAY}`)).toBeNull();
+    expect((app.data as AppData).doctor).toStrictEqual({});
+  });
+
+  it('reaches the rules: a collision with the note is a quiet finding, not a line', async () => {
+    const data = calm();
+    data.settings.wishLevels.W10 = 3;
+    put(data, MONDAY, 'A', 'R1', true); // 6:00-14:00
+    renderMonth(data);
+    await openForm('A', MONDAY);
+    await typeTimes('08:00', '12:00');
+    await userEvent.click(button('Uložit lékaře'));
+    const { findings } = vi.mocked(evaluateMonth).mock.results.at(-1)?.value as ReturnType<
+      typeof evaluateMonth
+    >;
+    expect(findings.filter((f) => f.rule === 'W10' && f.quiet === true)).toHaveLength(1);
+    expect(lines()).toEqual([]);
+    expect(checks().getByText('Musí: 0 · Přání: 0')).toBeInTheDocument();
+  });
+
+  it('works under StrictMode, which renders everything twice', async () => {
+    render(
+      <StrictMode>
+        <AppProvider storage={memoryStorage(plan(2))} runner={inProcessRunner}>
+          <MonthScreen initialMonth="2027-01" />
+          <Probe />
+        </AppProvider>
+      </StrictMode>,
+    );
+    await openForm('A', MONDAY);
+    await typeTimes('08:00', '12:00');
+    await userEvent.click(button('Uložit lékaře'));
+    expect(storedNote(MONDAY, 'A')).toStrictEqual({ from: 480, to: 720 });
+  });
+});
+
 describe('where the menu sits', () => {
   type Box = { top: number; left: number; width: number; height: number };
   /** jsdom has no layout: this gives the cells and the menu the boxes that a test asks for. */
@@ -710,11 +1028,40 @@ describe('where the menu sits', () => {
     expect(menuStyle().left).toBe('8px');
   });
 
+  it('puts the form of a note beside the cell again, being smaller than the list', async () => {
+    // The list is 300 px high and the form 100, in a window that is 768 px high. Neither fits
+    // below a cell at 700, so each ends 4 px above it.
+    vi.spyOn(Element.prototype, 'getBoundingClientRect').mockImplementation(function (
+      this: Element,
+    ) {
+      const role = this.getAttribute('role');
+      const [top, height] = this.getAttribute('data-testid')?.startsWith('cell-')
+        ? [700, 30]
+        : [0, role === 'menu' ? 300 : role === 'dialog' ? 100 : 0];
+      const width = role === null ? 34 : 120;
+      return { top, left: 200, width, height, bottom: top + height, right: 200 + width } as DOMRect;
+    });
+    renderMonth(plan(1));
+    await userEvent.click(cell('A', MONDAY));
+    expect(menuStyle().top).toBe('396px'); // 700 - 4 - 300
+    await userEvent.click(item('Lékař…'));
+    expect(screen.getByRole('dialog').style.top).toBe('596px'); // 700 - 4 - 100, not 396 again
+    expect(screen.getByRole('dialog').style.left).toBe('200px');
+  });
+
   it('closes when the window is resized', async () => {
     renderMonth(plan(1));
     await userEvent.click(cell('A', MONDAY));
     fireEvent(window, new Event('resize'));
     expect(screen.queryByRole('menu')).toBeNull();
+  });
+
+  it('closes the form of a note when the window is resized', async () => {
+    renderMonth(plan(1));
+    await userEvent.click(cell('A', MONDAY));
+    await userEvent.click(item('Lékař…'));
+    fireEvent(window, new Event('resize'));
+    expect(screen.queryByRole('dialog')).toBeNull();
   });
 
   it('closes when a scroll moves its cell, and stays for one that does not', async () => {
@@ -972,6 +1319,19 @@ function crowdedR2(...dates: ISODate[]): AppData {
 
 const M2_LINE = 'Operátor C · 1. 1.: R12 hned po O: jen 8 h odpočinku (min. 12 h)';
 const W7_LINE = 'Operátor A: víc dvanáctihodinových směn než ostatní';
+const S1_LINE = 'Operátor A · 27. 1.: noční směna, ale noční nechce';
+
+/**
+ * One line of each kind: a must (M2 for C), a wish on the 4th (W9, three people on R2) and, later
+ * in the month, a strong wish: A never works nights, and has an N on the 27th.
+ */
+function strongBetween(): AppData {
+  const data = crowdedR2(MONDAY);
+  put(data, '2026-12-31', 'C', 'O');
+  put(data, '2027-01-01', 'C', 'R12');
+  put(data, '2027-01-27', 'A', 'N');
+  return data;
+}
 
 describe('Kontrola', () => {
   it('is a region with a heading, and the number of musts and wishes', () => {
@@ -991,6 +1351,47 @@ describe('Kontrola', () => {
     const [must, wish] = checks().getAllByRole('button');
     expect(must).toHaveAttribute('data-severity', 'must');
     expect(wish).toHaveAttribute('data-severity', 'wish');
+  });
+
+  it('a strong wish is listed before the wishes, and after the musts, whatever the days', () => {
+    renderMonth(strongBetween());
+    // The wish is on the 4th and the strong wish on the 27th: the order is not the days'.
+    expect(lines()).toEqual([M2_LINE, S1_LINE, '4. 1.: nevyrovnaný počet R2']);
+  });
+
+  it('counts a strong wish as a wish in the summary', () => {
+    renderMonth(strongBetween());
+    expect(checks().getByText('Musí: 1 · Přání: 2')).toBeInTheDocument();
+  });
+
+  it('colours a strong wish amber like the wishes, and marks it as strong', () => {
+    renderMonth(strongBetween());
+    const [must, strong, wish] = checks().getAllByRole('button');
+    expect(must).toHaveAttribute('data-severity', 'must');
+    expect(strong).toHaveAttribute('data-severity', 'wish'); // amber, not the red of a must
+    expect(strong).toHaveAttribute('data-strong');
+    expect(wish).toHaveAttribute('data-severity', 'wish');
+    expect(must).not.toHaveAttribute('data-strong');
+    expect(wish).not.toHaveAttribute('data-strong');
+  });
+
+  it('lists a strong wish alone as a wish, and outlines its cell when picked', async () => {
+    const data = calm();
+    put(data, '2027-01-27', 'A', 'N'); // A never works nights
+    renderMonth(data);
+    expect(lines()).toEqual([S1_LINE]);
+    expect(checks().getByText('Musí: 0 · Přání: 1')).toBeInTheDocument();
+    expect(cell('A', '2027-01-27')).not.toHaveClass('must'); // a wish gets no red outline
+    await userEvent.click(checks().getByText(S1_LINE));
+    expect(cell('A', '2027-01-27')).toHaveClass('flagged');
+  });
+
+  it('goes when the night does', async () => {
+    const data = calm();
+    put(data, '2027-01-27', 'A', 'N');
+    renderMonth(data);
+    await choose('A', '2027-01-27', 'Vymazat');
+    expect(lines()).toEqual([]);
   });
 
   it('puts the musts of every kind before every wish, whatever the day', () => {
@@ -1208,6 +1609,20 @@ describe('the checks of a month', () => {
     expect(textOf({ days: [] })).toBe('Operátor A: přesčas 1 h');
     expect(textOf({ days: [3, 6] })).toBe('Operátor A: přesčas 1 h'); // the tail only
     expect(textOf({ person: 1, days: [10] })).toBe('Operátor B · 4. 1.: přesčas 1 h');
+  });
+
+  it('put the strong wishes between the musts and the other wishes, in any order', () => {
+    const must: Finding = { ...finding, rule: 'M6', severity: 'must', message: 'chybí h' };
+    const strong: Finding = { ...finding, rule: 'S1', strong: true, message: 'noční' };
+    const early: Finding = { ...finding, message: 'brzy', days: [8] };
+    // Each group keeps the order it came in: the wishes are `early`, then `finding`.
+    const checks = checksOf([early, finding, strong, must], ctx(), names);
+    expect(checks.map((check) => check.finding.message)).toEqual([
+      'chybí h',
+      'noční',
+      'brzy',
+      'přesčas 1 h',
+    ]);
   });
 
   it('leave out the quiet findings and put the musts first', () => {

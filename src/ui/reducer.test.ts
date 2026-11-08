@@ -3,7 +3,15 @@ import { Code } from '../domain/codes';
 import { buildMonthGrid } from '../domain/context';
 import type { MonthGrid } from '../domain/context';
 import { newAppData, newPerson } from '../domain/defaults';
-import type { AppData, ISODate, Person, PersonId, StoredCell } from '../domain/types';
+import type {
+  AppData,
+  DoctorNote,
+  ISODate,
+  Person,
+  PersonId,
+  StoredCell,
+} from '../domain/types';
+import { parseSaveFile, serialize } from '../storage/saveFile';
 import { reduce } from './reducer';
 import type { Action } from './reducer';
 
@@ -119,6 +127,86 @@ describe('togglePin', () => {
   it('ignores a day on which the person has no cell', () => {
     const data = plan(['2027-01-04', 'p2', { code: 'R1' }]);
     expect(toggle(data)).toBe(data);
+  });
+});
+
+describe('setDoctor', () => {
+  const NOTE: DoctorNote = { from: 480, to: 720 };
+
+  type Noted = [date: ISODate, personId: PersonId, note: DoctorNote];
+
+  /** A frozen plan of eight people, p1 to p8, with these doctor's notes stored. */
+  function planWithNotes(...notes: Noted[]): AppData {
+    const data = newAppData();
+    for (const [date, id, note] of notes) (data.doctor[date] ??= {})[id] = note;
+    return deepFreeze(data);
+  }
+
+  const set = (data: AppData, date: ISODate, personId: PersonId, note: DoctorNote | null) =>
+    reduce(data, { type: 'setDoctor', date, personId, note });
+
+  it('stores and deletes a note', () => {
+    const stored = set(planWithNotes(), '2027-01-04', 'p1', NOTE);
+    expect(stored.doctor).toStrictEqual({ '2027-01-04': { p1: NOTE } });
+    const deleted = set(stored, '2027-01-04', 'p1', null);
+    expect(deleted.doctor).toStrictEqual({});
+  });
+
+  it('keeps the notes of the others, and replaces the note of that person and day', () => {
+    const other: DoctorNote = { from: 600, to: 660 };
+    const data = planWithNotes(
+      ['2027-01-04', 'p2', other],
+      ['2027-01-05', 'p1', other],
+      ['2027-01-04', 'p1', other],
+    );
+    const next = set(data, '2027-01-04', 'p1', NOTE);
+    expect(next.doctor).toStrictEqual({
+      '2027-01-04': { p2: other, p1: NOTE },
+      '2027-01-05': { p1: other },
+    });
+  });
+
+  it('deletes one note and keeps the day while another person has a note on it', () => {
+    const data = planWithNotes(['2027-01-04', 'p1', NOTE], ['2027-01-04', 'p2', NOTE]);
+    expect(set(data, '2027-01-04', 'p1', null).doctor).toStrictEqual({
+      '2027-01-04': { p2: NOTE },
+    });
+  });
+
+  it('stores the note beside the cell of the day and does not touch it', () => {
+    const data = plan(['2027-01-04', 'p1', { code: 'R1', pinned: true }]);
+    const next = set(data, '2027-01-04', 'p1', NOTE);
+    expect(cellOf(next, '2027-01-04', 'p1')).toStrictEqual({ code: 'R1', pinned: true });
+    expect(next.doctor['2027-01-04'].p1).toStrictEqual(NOTE);
+    // And the cell goes with setCell alone: a note stays when the cell is cleared.
+    const clear: Action = { type: 'setCell', date: '2027-01-04', personId: 'p1', cell: null };
+    const cleared = reduce(next, clear);
+    expect(cleared.doctor['2027-01-04'].p1).toStrictEqual(NOTE);
+  });
+
+  it('gives back the same data when there is no note to delete', () => {
+    const data = planWithNotes(['2027-01-04', 'p1', NOTE]);
+    expect(set(data, '2027-01-04', 'p2', null)).toBe(data);
+    expect(set(data, '2027-01-06', 'p1', null)).toBe(data);
+  });
+
+  // The save file is refused with a note for someone who is not in the team, or a note that is
+  // not a stretch of one day: the reducer does not make one.
+  it('ignores a person who is not in the team', () => {
+    const data = planWithNotes();
+    expect(set(data, '2027-01-04', 'zz', NOTE)).toBe(data);
+  });
+
+  it.each([
+    ['one that ends where it starts', { from: 480, to: 480 }],
+    ['one that ends before it starts', { from: 720, to: 480 }],
+    ['one that starts before midnight', { from: -1, to: 60 }],
+    ['one that ends after the day', { from: 1380, to: 1441 }],
+    ['one with a part of a minute', { from: 480.5, to: 720 }],
+    ['one that is not a number', { from: Number.NaN, to: 720 }],
+  ])('ignores a note that is not a time span of the day: %s', (_what, note) => {
+    const data = planWithNotes();
+    expect(set(data, '2027-01-04', 'p1', note)).toBe(data);
   });
 });
 
@@ -471,6 +559,8 @@ describe('removePerson', () => {
     copy.months['2027-01'] = { status: 'draft', hoursAdjust: { p1: 3, p2: -1.5 } };
     copy.months['2026-12'] = { status: 'closed', hoursAdjust: { p1: 1 } };
     copy.months['2026-11'] = { status: 'closed' };
+    copy.doctor['2027-01-04'] = { p1: { from: 480, to: 720 }, p2: { from: 600, to: 660 } };
+    copy.doctor['2027-01-06'] = { p1: { from: 0, to: 1440 } };
     return deepFreeze(copy);
   })();
 
@@ -501,6 +591,28 @@ describe('removePerson', () => {
 
   it('leaves the hours adjustments of the others when a person with none is removed', () => {
     expect(remove('p5').months['2027-01'].hoursAdjust).toEqual({ p1: 3, p2: -1.5 });
+  });
+
+  it("deletes the person's doctor's notes", () => {
+    // p1's other note was alone on its day: that day goes too.
+    expect(remove('p1').doctor).toStrictEqual({ '2027-01-04': { p2: { from: 600, to: 660 } } });
+    expect(remove('p2').doctor).toStrictEqual({
+      '2027-01-04': { p1: { from: 480, to: 720 } },
+      '2027-01-06': { p1: { from: 0, to: 1440 } },
+    });
+  });
+
+  it('leaves the notes alone when a person with none is removed', () => {
+    expect(remove('p5').doctor).toStrictEqual(data.doctor);
+  });
+
+  // The file is refused for a note of someone who is not in the team (ruling R2), so a plan that
+  // was saved after the removal must still open.
+  it('leaves a plan that still saves and opens, though the person had a note', () => {
+    for (const personId of ['p1', 'p2', 'p5']) {
+      const next = remove(personId);
+      expect(parseSaveFile(serialize(next))).toEqual(next);
+    }
   });
 
   it('ignores a person who is not there', () => {

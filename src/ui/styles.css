@@ -624,6 +624,19 @@ h1 {
   line-height: 1;
 }
 
+/* A cell with a doctor's note: a small L in the corner, readable on every colour of a cell. */
+.month-doctor-marker {
+  position: absolute;
+  bottom: 1px;
+  left: 1px;
+  padding: 0 2px;
+  font-size: 9px;
+  line-height: 11px;
+  color: #fff;
+  background: var(--accent-strong);
+  border-radius: 2px;
+}
+
 /* The weekends and the holidays are grey columns, the previous month's days are faded. */
 
 .month-grid th.twelve,
@@ -753,6 +766,40 @@ h1 {
   background: var(--line);
 }
 
+/* The form of the doctor's note, in the place of the list of the menu. */
+.month-doctor-form {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 6px 8px;
+  align-items: center;
+  padding: 4px 6px;
+}
+
+.month-doctor-form input {
+  min-width: 0;
+  padding: 3px 6px;
+  font: inherit;
+  color: var(--text);
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+}
+
+.month-doctor-problem {
+  grid-column: 1 / -1;
+  max-width: 28ch;
+  margin: 0;
+  font-size: 0.85rem;
+  color: var(--danger-text);
+}
+
+.month-doctor-actions {
+  display: flex;
+  flex-wrap: wrap;
+  grid-column: 1 / -1;
+  gap: 6px;
+}
+
 /* The note after a copy floats over the page, so that showing and hiding it moves nothing. */
 .month-note {
   position: fixed;
@@ -863,6 +910,12 @@ h1 {
 .month-check[data-severity='wish'] {
   color: var(--warn-text);
   border-left-color: var(--wish);
+}
+
+/* A strong wish is amber like the wishes, with a wider bar: it comes before them in the list. */
+.month-check[data-strong] {
+  padding-left: 6px;
+  border-left-width: 8px;
 }
 
 .month-check[aria-pressed='true'] {

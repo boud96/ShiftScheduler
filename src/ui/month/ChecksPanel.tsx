@@ -56,7 +56,8 @@ function lineOf(finding: Finding, ctx: MonthContext, names: readonly string[]): 
 
 /**
  * The lines of the list for the findings of a month: those that are not quiet, the musts first,
- * then the wishes, each group in the order of `findings`. `names` are the people of `ctx`.
+ * then the strong wishes, then the other wishes, each group in the order of `findings`. `names`
+ * are the people of `ctx`.
  */
 export function checksOf(
   findings: readonly Finding[],
@@ -73,9 +74,11 @@ export function checksOf(
       const key = times === 0 ? base : `${base}#${times}`;
       return { key, finding, text: lineOf(finding, ctx, names) };
     });
+  const wishes = checks.filter((c) => c.finding.severity === 'wish');
   return [
     ...checks.filter((c) => c.finding.severity === 'must'),
-    ...checks.filter((c) => c.finding.severity === 'wish'),
+    ...wishes.filter((c) => c.finding.strong === true),
+    ...wishes.filter((c) => c.finding.strong !== true),
   ];
 }
 
@@ -113,7 +116,11 @@ interface ChecksPanelProps {
   onPick(key: string): void;
 }
 
-/** What the rules say about the month: the number of musts and of wishes, and a line for each. */
+/**
+ * What the rules say about the month: the number of musts and of wishes, and a line for each. A
+ * strong wish is a wish: it is counted with them and is amber like them, but its line is marked
+ * (`data-strong`), and it comes before the others.
+ */
 export function ChecksPanel({ checks, picked, onPick }: ChecksPanelProps) {
   const headingId = useId();
   const musts = countMusts(checks);
@@ -129,6 +136,7 @@ export function ChecksPanel({ checks, picked, onPick }: ChecksPanelProps) {
                 type="button"
                 className="month-check"
                 data-severity={check.finding.severity}
+                data-strong={check.finding.strong || undefined}
                 aria-pressed={check.key === picked}
                 onClick={() => onPick(check.key)}
               >
