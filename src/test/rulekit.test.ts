@@ -38,6 +38,15 @@ describe('ctxFor', () => {
     const december = ctxFor('2027-12', [{ nextDay: 'DOV' }]);
     expect(december.people[0].nextDay).toBe(Code.DOV);
   });
+  it('stores the codes of a patch on the 7 days before the tail, which are no cells of the rows', () => {
+    // February's tail starts on Mon 25 January: a night on Sun 24 ends at 06:00 that day, and an
+    // R1 on Mon 18, the first of the 7 days, at 14:00 a week before
+    const c = ctxFor('2027-02', [{ before: '- - - - - - N' }, {}, { before: 'R1 | x' }]);
+    expect(c.people.map((p) => p.restBefore)).toEqual([360, null, -7 * 1440 + 840]);
+    expect(ctxFor('2027-01', [{ before: '- - - - - - N12' }]).people[0].restBefore).toBe(360);
+    expect(() => ctxFor('2027-02', [{ before: 'R1 R1 R1 R1 R1 R1 R1 R1' }])).toThrow('room for 7');
+    expect(() => ctxFor('2027-02', [{ before: 'R3' }])).toThrow('Unknown code "R3"');
+  });
   it('lays the settings over the defaults', () => {
     const wishLevels = { ...defaultSettings().wishLevels, W6: 5 as const };
     const c = ctxFor('2027-02', 1, { minRestHours: 10, wishLevels });

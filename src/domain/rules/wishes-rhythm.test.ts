@@ -242,6 +242,21 @@ describe('W3 in detail', () => {
     expect(u(five, 'W3')).toBe(0);
     expect(u('R1 R1 R1 R1 R1 R12 R12 | R1', 'W3')).toBe(0);
   });
+  it('charges each day over 5 up to the maximum in a row, and leaves longer runs to M9', () => {
+    const seven = 'R1 R1 R1 R1 R1 R12 R12';
+    // at most 7 in a row: 7 days are 2 over the ideal, and break no must
+    const k7 = ctxFor('2027-02', 1, { maxDaysInRow: 7 });
+    const ev7 = run(k7, rowsOf(k7, [seven]));
+    expect(listed(rules(ev7, 'W3'), k7)).toEqual([
+      { message: '7 dní v kuse (ideálně nejvýš 5)', days: range(0, 6), units: 2 },
+    ]);
+    expect(rules(ev7, 'M9')).toEqual([]);
+    // at most 5 in a row: 6 days are M9's alone
+    const k5 = ctxFor('2027-02', 1, { maxDaysInRow: 5 });
+    const ev5 = run(k5, rowsOf(k5, [six]));
+    expect(rules(ev5, 'W3')).toEqual([]);
+    expect(rules(ev5, 'M9')).toHaveLength(1);
+  });
   it('adds a unit when 5 days of work are followed by 1 day off and more work', () => {
     expect(listed(found('W3', `${five} - R1`))).toEqual([
       { message: 'jen 1 den volna', days: [4, 5, 6], units: 0.5 },

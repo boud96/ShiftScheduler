@@ -3,10 +3,11 @@ import { mulberry32 } from '../../generator/rng';
 import { ctxFor, rowsOf, rules, run } from '../../test/rulekit';
 import type { PersonPatch } from '../../test/rulekit';
 import { CODE_NAMES, isShift } from '../codes';
+import { buildMonthGrid } from '../context';
 import type { MonthContext } from '../context';
-import { defaultSettings } from '../defaults';
+import { defaultSettings, newAppData } from '../defaults';
 import { days as fmtDays, fmtH } from '../format';
-import type { Settings, ShiftName } from '../types';
+import type { CodeName, ISODate, Settings, ShiftName } from '../types';
 import { runMusts, weeklyRest } from './restMusts';
 import type { Finding, MustId, PersonStats, Sink } from './types';
 import { HARD } from './weights';
@@ -277,18 +278,78 @@ describe('M11 in detail', () => {
   });
 });
 
+describe('M11 and the last shift before the tail', () => {
+  // February 2027: the tail is Mon 25 to Sun 31 January, and the week before it Mon 18 to Sun 24.
+  // From Tue 26: O, O, N, N, N12, a day off, R1 and R1, with rests of 16, 24, 16, 12, 24 and 16 h.
+  const tail = '- O O N N N12 -';
+  const month = 'R1 R1';
+
+  it('starts the rest at 06:00 on the first day of the tail after a night the day before', () => {
+    // The night of Sun 24 ends at 06:00 on Mon 25: 32 h before the O of Tue 26, the longest rest
+    // in the 7 days from Tue 26.
+    const at = (hours: number) =>
+      ctxFor('2027-02', [{ before: '- - - - - - N' }], { weeklyRestHours: hours });
+    expect(at(32).people[0].restBefore).toBe(360);
+    expect(found('M11', month, tail, at(32))).toEqual([]);
+    expect(found('M11', month, tail, at(32.5))).toEqual([{
+      rule: 'M11', severity: 'must', person: 0, days: [at(32.5).first],
+      message: 'jen 32 h volna v kuse za 7 dní (min. 32,5 h)', penalty: HARD,
+    }]);
+  });
+  it('takes the time before the first shift for rest when no shift is stored the week before', () => {
+    const none = ctxFor('2027-02', 1, { weeklyRestHours: 32.5 });
+    expect(none.people[0].restBefore).toBeNull();
+    expect(found('M11', month, tail, none)).toEqual([]);
+  });
+  it('fails in February too the window of 26 January to 1 February that fails in January', () => {
+    // N12 on Sun 24 January, Mon 25 off, then R1 at 06:00 on Tue 26: 24 h of rest. Short rests
+    // follow up to the night of Mon 1 February, which ends on Tue 2.
+    const data = newAppData();
+    const stored: Array<[ISODate, CodeName]> = [
+      ['2027-01-24', 'N12'], ['2027-01-26', 'R1'], ['2027-01-27', 'R1'], ['2027-01-28', 'O'],
+      ['2027-01-30', 'R12'], ['2027-01-31', 'R12'], ['2027-02-01', 'N'],
+    ];
+    for (const [date, code] of stored) data.cells[date] = { p1: { code } };
+    const weeklyRestOf = (month: string) => {
+      const g = buildMonthGrid(data, month);
+      return rules(run(g.ctx, g.rows), 'M11').map((f) => ({
+        person: f.person,
+        dates: f.days.map((d) => g.ctx.days[d].date),
+        message: f.message,
+        penalty: f.penalty,
+      }));
+    };
+    const message = 'jen 32 h volna v kuse za 7 dní (min. 35 h)';
+    // January: the windows from Mon 25 and from Tue 26, the last that ends with 1 February
+    const january = ['25', '26', '27', '28', '29', '30', '31'].map((d) => `2027-01-${d}`);
+    expect(weeklyRestOf('2027-01')).toEqual([
+      { person: 0, dates: january, message, penalty: 2 * HARD },
+    ]);
+    // February: the window from Tue 26, whose rest before it began at 06:00 on Mon 25
+    expect(weeklyRestOf('2027-02')).toEqual([
+      { person: 0, dates: ['2027-02-01'], message, penalty: HARD },
+    ]);
+  });
+});
+
 /**
- * M11 the slow way, straight from the rule: the rests are the gaps between the shifts, with the
- * time before the first shift and after the last one as rest. A window of 7 days is checked if it
- * has a day of the month and ends by the end of the day after the month, and it fails if no rest
- * of the minimum overlaps it. Each stretch of failing windows is a finding.
+ * M11 the slow way, straight from the rule: the rests are the gaps between the shifts, from the
+ * end of the last shift before the tail (`restBefore`) or, if none is known, from forever, and up
+ * to forever after the last shift. A window of 7 days is checked if it has a day of the month and
+ * ends by the end of the day after the month, and it fails if no rest of the minimum overlaps it.
+ * Each stretch of failing windows is a finding.
  */
-function slowWeeklyRest(ctx: MonthContext, row: Uint8Array, next: number) {
+function slowWeeklyRest(
+  ctx: MonthContext,
+  row: Uint8Array,
+  next: number,
+  restBefore: number | null,
+) {
   const DAY = 1440;
   const n = ctx.days.length; // the index of the day after the month
   const { shifts, weeklyRestHours } = ctx.settings;
   const rests: Array<[number, number]> = [];
-  let free = -Infinity;
+  let free = restBefore ?? -Infinity;
   for (let i = 0; i <= n; i++) {
     const code = i < n ? row[i] : next;
     if (!isShift(code)) continue;
@@ -320,9 +381,12 @@ function slowWeeklyRest(ctx: MonthContext, row: Uint8Array, next: number) {
 }
 
 describe('the rules of days in a row and weekly rest, on rows of any kind', () => {
-  /** People with different codes stored for the day after the month. */
-  const people: PersonPatch[] = [{}, { nextDay: 'R1' }, { nextDay: 'O' }, { nextDay: 'N' },
-    { nextDay: 'N12' }, { nextDay: 'x' }];
+  /** People with different codes stored for the day after the month and the week before the tail. */
+  const people: PersonPatch[] = [
+    {}, { nextDay: 'R1' }, { nextDay: 'O' }, { nextDay: 'N' }, { nextDay: 'N12' }, { nextDay: 'x' },
+    { before: '- - - - - - N' }, { before: '- - - - - - R1', nextDay: 'N' },
+    { before: '- - - - O - -' }, { before: 'N12 - - - - - -' }, { before: '- - - - - - x' },
+  ];
   const variants: Array<[string, Partial<Settings>]> = [
     ['the default settings', {}],
     ['a weekly rest of 24 h and at most 4 days in a row', { weeklyRestHours: 24, maxDaysInRow: 4 }],
@@ -357,7 +421,8 @@ describe('the rules of days in a row and weekly rest, on rows of any kind', () =
     for (let k = 0; k < 600; k++) {
       const p = k % people.length;
       const row = randomRow(ctx.days.length, random, k % 2 === 0 ? 0.9 : 0.7);
-      const slow = slowWeeklyRest(ctx, row, ctx.people[p].nextDay);
+      const { nextDay, restBefore } = ctx.people[p];
+      const slow = slowWeeklyRest(ctx, row, nextDay, restBefore);
       const stats = fresh();
       const seen: Finding[] = [];
       const score = weeklyRest(ctx, p, row, stats, (f) => seen.push(f));

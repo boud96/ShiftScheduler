@@ -139,23 +139,25 @@ export function runMusts(
 }
 
 /**
- * The longest rest between two shifts of `row` that overlaps the window of the 7 days from day
- * `w`, in minutes; 0 if there is none. Only for the message of M11: call it only when there is a
- * sink. The time before the first shift and after the last one is left out: it overlaps no window
- * that fails.
+ * The longest rest of person `p` that overlaps the window of the 7 days from day `w`, in minutes;
+ * 0 if there is none. Only for the message of M11: call it only when there is a sink. The rests
+ * counted are those between two shifts, the last shift before the tail (`restBefore`) included.
+ * The unknown time before the first shift and after the last one is left out: it overlaps no
+ * window that fails.
  */
-function longestRest(ctx: MonthContext, row: Uint8Array, next: number, w: number): number {
+function longestRest(ctx: MonthContext, p: number, row: Uint8Array, w: number): number {
   const times = shiftTimes(ctx);
   const n = ctx.days.length;
+  const { nextDay, restBefore } = ctx.people[p];
   const from = w * MINUTES_PER_DAY;
   const to = (w + WEEK) * MINUTES_PER_DAY;
   let longest = 0;
-  let free = -1; // when the shifts so far have ended; -1 before the first
+  let free = restBefore ?? -Infinity; // when the shifts so far have ended, if that is known
   for (let i = 0; i <= n; i++) {
-    const code = codeOn(row, n, next, i);
+    const code = codeOn(row, n, nextDay, i);
     if (!isShift(code)) continue;
     const start = i * MINUTES_PER_DAY + times[2 * code];
-    if (free >= 0 && start >= free && free < to && start > from) {
+    if (free > -Infinity && start >= free && free < to && start > from) {
       longest = Math.max(longest, start - free);
     }
     free = Math.max(free, i * MINUTES_PER_DAY + times[2 * code + 1]);
@@ -177,7 +179,7 @@ function failing(
 ): number {
   const count = to - from + 1;
   if (sink !== undefined) {
-    const longest = longestRest(ctx, row, ctx.people[p].nextDay, from) / 60;
+    const longest = longestRest(ctx, p, row, from) / 60;
     const message =
       `jen ${fmtH(longest)} h volna v kuse za 7 dní ` +
       `(min. ${fmtH(ctx.settings.weeklyRestHours)} h)`;
@@ -193,8 +195,11 @@ function failing(
  *
  * It counts in minutes from midnight of the first day of the row. Each shift lasts from its start
  * to its end in the settings, from the tail to the day after the month. A rest is the time between
- * the end of one shift and the start of the next. The time before the first of these shifts and
- * after the last one is unknown, so it counts as rest: no alarm.
+ * the end of one shift and the start of the next. The rest before the first of these shifts starts
+ * when the person's last shift of the week before the tail ended (`EnginePerson.restBefore`):
+ * else a short rest that began before the tail could hide there, and this month could break the
+ * rule where only the month before shows it. Only when no shift is stored in that week, and after
+ * the last shift, is the time unknown, so it counts as rest: no alarm.
  *
  * Window w is the 7 days from day w, and it passes if a rest of the minimum overlaps it. Such a
  * rest counts whole, even if it begins before the window or ends after it: else an ordinary week
@@ -220,34 +225,32 @@ export function weeklyRest(
   const { first } = ctx;
   const times = shiftTimes(ctx);
   const n = ctx.days.length;
-  const next = ctx.people[p].nextDay;
+  const { nextDay, restBefore } = ctx.people[p];
   const min = ctx.settings.weeklyRestHours * 60;
   const lastWindow = n + 1 - WEEK; // the last one, which ends with the day after the month
   // the first window not yet judged: at the start, the first one with a day of the month
   let open = Math.max(0, first + 1 - WEEK);
   let units = 0;
-  let free = -1; // when the shifts so far have ended; -1 before the first
+  // When the shifts so far have ended. -Infinity while none is known: the time before the first
+  // shift then counts as a rest that began forever ago, long enough, and missing no window.
+  let free = restBefore ?? -Infinity;
 
   for (let i = 0; i <= n; i++) {
-    const code = codeOn(row, n, next, i);
+    const code = codeOn(row, n, nextDay, i);
     if (!isShift(code)) continue;
     const start = i * MINUTES_PER_DAY + times[2 * code];
-    if (free < 0 || start - free >= min) {
-      // A rest of the minimum ends here (the time before the first shift is one): the windows
-      // from `open` up to the last one it misses fail, and those it overlaps pass.
-      if (free >= 0) {
-        const missed = Math.min(Math.floor(free / MINUTES_PER_DAY) - WEEK, lastWindow);
-        if (missed >= open) units += failing(ctx, p, row, open, missed, sink);
-      }
+    if (start - free >= min) {
+      // a rest of the minimum ends here: the windows from `open` up to the last one it misses
+      // fail, and those it overlaps pass
+      const missed = Math.min(Math.floor(free / MINUTES_PER_DAY) - WEEK, lastWindow);
+      if (missed >= open) units += failing(ctx, p, row, open, missed, sink);
       open = Math.max(open, Math.ceil(start / MINUTES_PER_DAY));
     }
     free = Math.max(free, i * MINUTES_PER_DAY + times[2 * code + 1]);
   }
   // the time after the last shift: it overlaps every window from the day it begins less 6 on
-  if (free >= 0) {
-    const missed = Math.min(Math.floor(free / MINUTES_PER_DAY) - WEEK, lastWindow);
-    if (missed >= open) units += failing(ctx, p, row, open, missed, sink);
-  }
+  const missed = Math.min(Math.floor(free / MINUTES_PER_DAY) - WEEK, lastWindow);
+  if (missed >= open) units += failing(ctx, p, row, open, missed, sink);
 
   stats.mustUnits += units;
   return HARD * units;

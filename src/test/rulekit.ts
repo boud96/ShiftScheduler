@@ -1,6 +1,7 @@
-import { addMonths } from '../domain/calendar';
-import { codeFromName } from '../domain/codes';
-import { buildMonthGrid } from '../domain/context';
+import { TAIL_DAYS, addDays, addMonths } from '../domain/calendar';
+import { codeFromName, nameOf } from '../domain/codes';
+import type { CodeInt } from '../domain/codes';
+import { REST_LOOK_BACK_DAYS, buildMonthGrid } from '../domain/context';
 import type { MonthContext } from '../domain/context';
 import { defaultSettings, newAppData, newPerson } from '../domain/defaults';
 import { evaluateMonth } from '../domain/rules/evaluate';
@@ -24,6 +25,12 @@ export interface PersonPatch {
   startingCounts?: Partial<FairnessCounts>;
   /** The code stored for the person on day 1 of the month after the one asked for. */
   nextDay?: CodeName;
+  /**
+   * The codes stored for the person on the `REST_LOOK_BACK_DAYS` days before the tail, as a strip
+   * read like those of `rowsOf`. They are no cells of the rows: the context reads the last shift
+   * among them (`EnginePerson.restBefore`).
+   */
+  before?: string;
 }
 
 /**
@@ -48,6 +55,15 @@ export function ctxFor(
     if (patch.nextDay !== undefined) {
       const after = `${addMonths(month, 1)}-01`;
       (data.cells[after] ??= {})[person.id] = { code: patch.nextDay };
+    }
+    if (patch.before !== undefined) {
+      const week = new Uint8Array(REST_LOOK_BACK_DAYS);
+      fillRow(week, patch.before, 0, REST_LOOK_BACK_DAYS);
+      const from = addDays(`${month}-01`, -TAIL_DAYS - REST_LOOK_BACK_DAYS);
+      week.forEach((code, k) => {
+        const name = nameOf(code as CodeInt);
+        if (name !== null) (data.cells[addDays(from, k)] ??= {})[person.id] = { code: name };
+      });
     }
     return person;
   });

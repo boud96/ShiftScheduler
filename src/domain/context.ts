@@ -13,8 +13,17 @@ import type {
   PersonId,
   Preferences,
   Settings,
+  ShiftName,
   WishId,
 } from './types';
+
+/**
+ * How many days before the tail `EnginePerson.restBefore` looks back on: a week. A shift that ended
+ * before them leaves more than a week of rest before the first day of the tail, more than any
+ * weekly rest asks for.
+ */
+export const REST_LOOK_BACK_DAYS = 7;
+const MINUTES_PER_DAY = 1440;
 
 /** One person as the rule engine sees them in a month. */
 export interface EnginePerson {
@@ -54,6 +63,14 @@ export interface EnginePerson {
    * `Code.EMPTY` when nothing is stored there, and when the person is not in the team on that day.
    */
   nextDay: CodeInt;
+  /**
+   * When the person's last shift on the `REST_LOOK_BACK_DAYS` days before the tail ends, in minutes
+   * from midnight of the first day of `MonthContext.days`: 0 or less, or more for a night that ends
+   * on that day. Read from the stored cells, like the tail, and no cell of the rows. Null when no
+   * shift is stored on those days. The weekly rest (M11) starts the rest before the first shift of
+   * the row there.
+   */
+  restBefore: number | null;
 }
 
 /** Everything the rule engine needs about one month, apart from the cells themselves. */
@@ -91,6 +108,27 @@ const contextDays = (month: MonthKey, settings: Settings): DayInfo[] => [
   ...monthDays(month, settings),
 ];
 
+/**
+ * When the last shift that person `id` has stored on `dates` ends, `dates[k]` being the day `k + 1`
+ * days before the first day of the tail: in minutes from midnight of that first day. Null if no
+ * shift is stored there.
+ */
+function lastShiftEnd(
+  data: AppData,
+  id: PersonId,
+  dates: readonly ISODate[],
+  settings: Settings,
+): number | null {
+  let last: number | null = null;
+  for (let k = 0; k < dates.length; k++) {
+    const code = codeFromName(data.cells[dates[k]]?.[id]?.code ?? '');
+    if (code === null || !isShift(code)) continue;
+    const end = -(k + 1) * MINUTES_PER_DAY + settings.shifts[nameOf(code) as ShiftName].end;
+    if (last === null || end > last) last = end;
+  }
+  return last;
+}
+
 /** Whether the person is in the team on `date`. The first and the last active day count. */
 function activeOn(person: Person, date: ISODate): boolean {
   return (
@@ -121,7 +159,9 @@ function membersOf(data: AppData, days: DayInfo[]): Member[] {
  * in the row, so that rule M3 can flag a shift there.
  *
  * What is stored for a person on day 1 of the next month goes to `EnginePerson.nextDay`, outside
- * the rows: the month's last day is judged against it, and no move can change it.
+ * the rows: the month's last day is judged against it, and no move can change it. Of the week
+ * before the tail only the end of the person's last shift is kept (`EnginePerson.restBefore`),
+ * for the weekly rest.
  *
  * Beside the rows, each person carries what the rules need to know of them: their limits, the days
  * of their claimed holiday shifts, their doctor's notes, and the fairness counts of the months
@@ -131,6 +171,9 @@ export function buildMonthGrid(data: AppData, month: MonthKey): MonthGrid {
   const { settings } = data;
   const days = contextDays(month, settings);
   const dayAfter = addDays(days[days.length - 1].date, 1);
+  const weekBefore = Array.from({ length: REST_LOOK_BACK_DAYS }, (_, k) =>
+    addDays(days[0].date, -(k + 1)),
+  );
   const adjustments = data.months[month]?.hoursAdjust;
   const people: EnginePerson[] = [];
   const rows: Uint8Array[] = [];
@@ -177,6 +220,7 @@ export function buildMonthGrid(data: AppData, month: MonthKey): MonthGrid {
       doctorTo,
       history: addCounts(person.startingCounts, historyCounts(data, month, person.id)),
       nextDay: codeFromName(next?.code ?? '') ?? Code.EMPTY,
+      restBefore: lastShiftEnd(data, person.id, weekBefore, settings),
     });
     rows.push(row);
     fixed.push(locked);

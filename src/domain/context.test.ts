@@ -239,6 +239,52 @@ describe('the day after the month', () => {
   });
 });
 
+describe('the last shift before the tail', () => {
+  // February 2027's tail is Mon 25 to Sun 31 January, and `restBefore` looks at the week before it,
+  // Mon 18 to Sun 24, in minutes from midnight of Mon 25.
+  const restBefores = (data: AppData, month = '2027-02') =>
+    buildMonthGrid(data, month).ctx.people.map((p) => p.restBefore);
+
+  it('is when the latest shift of the 7 days before the tail ends', () => {
+    const data = newAppData();
+    data.cells['2027-01-24'] = { p1: { code: 'R1' }, p2: { code: 'N' }, p3: { code: 'N12' } };
+    data.cells['2027-01-18'] = { p4: { code: 'O' } };
+    data.cells['2027-01-20'] = { p5: { code: 'N' } };
+    data.cells['2027-01-22'] = { p5: { code: 'R1' } };
+    expect(restBefores(data)).toEqual([
+      -1440 + 840, // R1 on Sun 24 ends at 14:00, the day before the tail
+      360, // a night on Sun 24 ends at 06:00 on Mon 25, the first day of the tail
+      360,
+      -7 * 1440 + 1320, // O on Mon 18, a week before the tail, ends at 22:00
+      -3 * 1440 + 840, // p5's R1 on Fri 22 ends after the night of Wed 20
+      null,
+      null,
+      null,
+    ]);
+  });
+  it('is null without a shift in those 7 days: one before them or in the tail does not count', () => {
+    const data = newAppData();
+    data.cells['2027-01-17'] = { p1: { code: 'N' } }; // 8 days before the tail
+    data.cells['2027-01-25'] = { p2: { code: 'R1' } }; // the first day of the tail
+    data.cells['2027-01-21'] = { p3: { code: 'x' }, p4: { code: 'DOV' } }; // no shift
+    expect(restBefores(data)).toEqual(Array(8).fill(null));
+    expect(restBefores(newAppData())).toEqual(Array(8).fill(null));
+  });
+  it('takes the end of the shift from the settings', () => {
+    const data = newAppData();
+    data.settings.shifts = { ...data.settings.shifts, N: { start: 1320, end: 1860, hours: 8.5 } };
+    data.cells['2027-01-24'] = { p1: { code: 'N' } }; // now until 07:00
+    expect(restBefores(data)[0]).toBe(420);
+  });
+  it('looks back across the turn of a year, and puts nothing in the rows', () => {
+    const data = newAppData();
+    data.cells['2026-12-24'] = { p1: { code: 'N12' } }; // the day before January's tail
+    const g = buildMonthGrid(data, '2027-01');
+    expect(g.ctx.people[0].restBefore).toBe(360);
+    expect(g.rows[0].every((code) => code === Code.EMPTY)).toBe(true);
+  });
+});
+
 describe('the limits, claimed holidays, notes and history of each person', () => {
   const peopleOf = (data: AppData, month = '2027-01') => buildMonthGrid(data, month).ctx.people;
   /** The indexes at which a mask holds 1. */

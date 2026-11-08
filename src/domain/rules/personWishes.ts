@@ -12,8 +12,8 @@ const OVERTIME_TOLERANCE = 1e-9;
 /** W2: a block of one weekday shift should last this many days at least. */
 const MIN_BLOCK = 4;
 /**
- * W3: a stretch of work should last this many days at most. One day more costs W3; more than that
- * is left to rule M9 (at most 6 days in a row by default).
+ * W3: a stretch of work should last this many days at most. Each day more costs W3, up to the most
+ * days in a row that rule M9 allows; a longer stretch is M9's alone.
  */
 const IDEAL_STRETCH = 5;
 /** W3: after a stretch of this many days or more, one day off is too few. */
@@ -159,7 +159,9 @@ function stretchBlocks(
  * month. A stretch that ended before the month was judged with the month it belongs to.
  *
  * W3 asks for stretches of 5 days at most, with days off in pairs:
- * - a stretch of 6 days costs W3 (a longer one is left to M9);
+ * - a stretch longer than 5 days costs W3 for each day over 5, as long as it is no longer than
+ *   `settings.maxDaysInRow`; a longer one is M9's alone (at the default maximum of 6, a stretch of
+ *   6 days costs W3 and one of 7 costs none);
  * - one day off after 5 days of work or more costs W3 (after 6 or more, M10's too);
  * - one day off between stretches that make 12 days of work or more costs 3 × W3;
  * - and every single day off between two days of work costs W3 / 2. Such a finding is quiet, so
@@ -169,6 +171,7 @@ function stretchBlocks(
 function rhythm(ctx: MonthContext, p: number, row: Uint8Array, sink?: Sink): number {
   const { first } = ctx;
   const W3 = ctx.weights.W3;
+  const maxInRow = ctx.settings.maxDaysInRow;
   const last = ctx.days.length - 1;
   let score = 0;
   let prevStart = 0; // the stretch before the one in hand
@@ -186,9 +189,9 @@ function rhythm(ctx: MonthContext, p: number, row: Uint8Array, sink?: Sink): num
     if (e >= first) {
       const length = e - s + 1;
 
-      // W3: one day longer than the ideal stretch
-      if (length === IDEAL_STRETCH + 1) {
-        const penalty = W3;
+      // W3: longer than the ideal stretch, but within what M9 allows
+      if (length > IDEAL_STRETCH && length <= maxInRow) {
+        const penalty = (length - IDEAL_STRETCH) * W3;
         score += penalty;
         if (sink !== undefined && penalty > 0) {
           const message = `${fmtDays(length)} v kuse (ideálně nejvýš ${IDEAL_STRETCH})`;
