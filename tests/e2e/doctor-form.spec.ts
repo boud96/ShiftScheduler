@@ -28,6 +28,7 @@ async function openForm(page: Page, person = 'p1') {
   const from = page.getByLabel('od', { exact: true });
   await expect(from).toBeFocused(); // the focus goes to the first box when the form opens
   return {
+    month,
     cell,
     dialog: page.getByRole('dialog'),
     from,
@@ -78,6 +79,47 @@ test('Tab goes through both boxes to the button, and past the button closes the 
   await page.keyboard.press('Tab'); // past the last control, which is the button
   await expect(dialog).toBeHidden();
   await expect(cell).toBeFocused();
+});
+
+// In Chromium a press of the mouse on a button focuses it, so a click on the cell of the form takes
+// the focus out of the form before the click itself comes. jsdom does not show what a browser does
+// with the press, and the first of these is the one that bit.
+
+test('a click on the cell whose form is open closes it, and opens nothing', async ({ page }) => {
+  const { cell, dialog } = await openForm(page);
+  await cell.click();
+  await expect(dialog).toBeHidden();
+  await expect(page.getByRole('menu')).toHaveCount(0);
+  await expect(cell).toHaveAttribute('aria-expanded', 'false');
+});
+
+test('a click on another cell opens its list, and a click on the heading closes a form', async ({
+  page,
+}) => {
+  const { month, dialog } = await openForm(page);
+  await month.locator('[data-testid^="cell-p2-"]').nth(10).click();
+  await expect(dialog).toBeHidden();
+  await expect(page.getByRole('menu', { name: /^Operátor 2 · / })).toBeVisible();
+
+  // The form of that cell this time, and then a click away from the grid.
+  await page.getByRole('menuitem', { name: 'Lékař…' }).click();
+  await expect(dialog).toBeVisible();
+  await month.getByRole('heading', { level: 2 }).click();
+  await expect(dialog).toBeHidden();
+  await expect(page.getByRole('menu')).toHaveCount(0);
+});
+
+test('a click inside the form, on a label, a box or the padding, keeps it and its times', async ({
+  page,
+}) => {
+  const { dialog, from, to } = await openForm(page);
+  await from.fill('08:00');
+  await dialog.getByText('do', { exact: true }).click(); // the label of the other box
+  await expect(to).toBeFocused(); // which the label gives the focus
+  await to.click();
+  await dialog.click({ position: { x: 2, y: 2 } }); // the padding: no element takes the focus
+  await expect(dialog).toBeVisible();
+  await expect(from).toHaveValue('08:00');
 });
 
 test('Enter sends no form: the message is shown, and nothing is requested', async ({

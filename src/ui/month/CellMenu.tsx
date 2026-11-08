@@ -86,14 +86,21 @@ interface CellMenuProps {
  * (two times, `Uložit lékaře`, and `Odebrat lékaře` for a cell that has a note). It sits next to
  * the cell, in the window, so that the scrolling box of the grid does not cut it off, and it
  * closes where the page would rather not have it: on Escape and Tab, on a click outside it, and
- * when the page is resized, or scrolled so that its cell moves. The focus goes into it, and the
- * arrow keys move it. It does not store anything: it says what was chosen.
+ * when the page is resized, or scrolled so that its cell moves; the form of the note also when the
+ * focus goes to another element. The focus goes into it, and the arrow keys move it. It does not
+ * store anything: it says what was chosen.
  */
 export function CellMenu(props: CellMenuProps) {
   const { anchor, label, dayType, pin, doctor, onChoose, onClose } = props;
   const box = useRef<HTMLDivElement>(null);
   /** Where the cell was when the menu was put beside it. */
   const placedAt = useRef<{ top: number; left: number } | null>(null);
+  /**
+   * Whether a button of the mouse is down on the cell, from its press to its release. A button
+   * takes the focus when it is pressed, and for the form that is no move out of it: the click on
+   * the cell is the cell's own, and closes the menu (`onCell`). See `onDialogBlur`.
+   */
+  const pressingCell = useRef(false);
   /** Whether the form of the doctor's note has taken the place of the list. */
   const [editingNote, setEditingNote] = useState(false);
   const shifts = dayType === 'weekday' ? WEEKDAY_CODES : TWELVE_CODES;
@@ -131,8 +138,15 @@ export function CellMenu(props: CellMenuProps) {
     const outside = (e: MouseEvent) => {
       const target = e.target;
       if (!(target instanceof Node)) return;
-      if (box.current?.contains(target) || anchor.current?.contains(target)) return;
+      if (anchor.current?.contains(target)) {
+        pressingCell.current = true;
+        return;
+      }
+      if (box.current?.contains(target)) return;
       onClose(false);
+    };
+    const released = () => {
+      pressingCell.current = false;
     };
     const escape = (e: KeyboardEvent) => {
       if (e.key !== 'Escape') return;
@@ -154,11 +168,13 @@ export function CellMenu(props: CellMenuProps) {
     };
     // The scroll of any box on the page reaches the window while it is captured.
     document.addEventListener('mousedown', outside);
+    document.addEventListener('mouseup', released);
     document.addEventListener('keydown', escape);
     window.addEventListener('resize', resized);
     window.addEventListener('scroll', scrolled, true);
     return () => {
       document.removeEventListener('mousedown', outside);
+      document.removeEventListener('mouseup', released);
       document.removeEventListener('keydown', escape);
       window.removeEventListener('resize', resized);
       window.removeEventListener('scroll', scrolled, true);
@@ -170,14 +186,25 @@ export function CellMenu(props: CellMenuProps) {
     onClose(true);
   };
 
+  // The focus moving to an element outside the form closes it, and stays where it went. Two moves
+  // do not: one to no element, as when another window is switched to (the form is there when it is
+  // back), and the one that a press of the mouse on the cell makes, for the click that follows is
+  // the cell's own and closes the menu, and a menu closed here would be opened again by it.
+  const onDialogBlur = (e: ReactFocusEvent<HTMLDivElement>) => {
+    const goingTo = e.relatedTarget;
+    if (!(goingTo instanceof Node) || e.currentTarget.contains(goingTo)) return;
+    if (pressingCell.current && anchor.current?.contains(goingTo)) return;
+    onClose(false);
+  };
+
   if (editingNote) {
     return (
-      <div ref={box} role="dialog" aria-label={label} className="month-menu">
+      <div ref={box} role="dialog" aria-label={label} className="month-menu" onBlur={onDialogBlur}>
         <DoctorForm
           note={doctor}
           onSave={(note) => choose({ type: 'doctor', note })}
           onRemove={() => choose({ type: 'doctor', note: null })}
-          onLeave={onClose}
+          onLeave={() => onClose(true)}
           onResize={place}
         />
       </div>
@@ -250,12 +277,8 @@ interface DoctorFormProps {
   /** `Uložit lékaře`, with times that make a note. */
   onSave(note: DoctorNote): void;
   onRemove(): void;
-  /**
-   * The focus has left the form, and so it is to close: `restoreFocus` is whether the cell is to
-   * take the focus, which it is after Tab past the last control, and is not after a move that the
-   * focus made by itself, for it is where it went.
-   */
-  onLeave(restoreFocus: boolean): void;
+  /** Tab past the last control: the form is to close, and the cell is to take the focus. */
+  onLeave(): void;
   /** The form is a different size now, so it is to be put beside the cell again. */
   onResize(): void;
 }
@@ -304,30 +327,17 @@ function DoctorForm({ note, onSave, onRemove, onLeave, onResize }: DoctorFormPro
   // list. The last control is a button, so the focus on it is the place to leave from. Shift+Tab
   // is the browser's: a time box has parts (the hour, the minute), and Tab and Shift+Tab move
   // between them with the focus staying on the box, so the focus on the first box does not mean
-  // that it is on its first part. The move out of the form closes it (`onBlur`).
+  // that it is on its first part. The move out of the form closes it (`onDialogBlur`).
   const onKeyDown = (e: ReactKeyboardEvent<HTMLFormElement>) => {
     if (e.key !== 'Tab' || e.shiftKey) return;
     const controls = e.currentTarget.querySelectorAll<HTMLElement>('input, button');
     if (document.activeElement !== controls[controls.length - 1]) return;
     e.preventDefault();
-    onLeave(true);
-  };
-
-  // The focus moving to an element outside the form closes it, and stays where it went. A move to
-  // no element, as when another window is switched to, does not: the form is there when it is back.
-  const onBlur = (e: ReactFocusEvent<HTMLFormElement>) => {
-    const goingTo = e.relatedTarget;
-    if (goingTo instanceof Node && !e.currentTarget.contains(goingTo)) onLeave(false);
+    onLeave();
   };
 
   return (
-    <form
-      className="month-doctor-form"
-      noValidate
-      onSubmit={submit}
-      onKeyDown={onKeyDown}
-      onBlur={onBlur}
-    >
+    <form className="month-doctor-form" noValidate onSubmit={submit} onKeyDown={onKeyDown}>
       <label htmlFor={fromId}>{doctor.from}</label>
       <input id={fromId} ref={first} type="time" value={from} onChange={typed(setFrom)} />
       <label htmlFor={toId}>{doctor.to}</label>

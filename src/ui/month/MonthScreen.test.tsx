@@ -960,6 +960,74 @@ describe("the doctor's note", () => {
     expect(dialog()).toBeInTheDocument();
   });
 
+  // A press of the mouse on a button focuses it, so a click on the cell of the form takes the focus
+  // out of the form before the click itself comes: the cell's own click is what closes the menu.
+  it('closes on a click on its own cell, as the list does, and opens nothing', async () => {
+    renderMonth(plan(2));
+    await openForm('A', MONDAY);
+    await userEvent.click(cell('A', MONDAY));
+    expect(screen.queryByRole('dialog')).toBeNull();
+    expect(screen.queryByRole('menu')).toBeNull();
+    expect(cell('A', MONDAY)).toHaveAttribute('aria-expanded', 'false');
+    expect(storedNote(MONDAY, 'A')).toBeUndefined(); // closing is no saving
+  });
+
+  it('is not closed by the press on its cell, but by the click that follows it', async () => {
+    renderMonth(plan(2));
+    await openForm('A', MONDAY);
+    await typeTimes('08:00', '12:00');
+    const own = cell('A', MONDAY);
+    fireEvent.mouseDown(own);
+    act(() => own.focus()); // which is what a browser does with the press
+    expect(dialog()).toBeInTheDocument();
+    expect(fromBox()).toHaveValue('08:00');
+    fireEvent.mouseUp(own);
+    fireEvent.click(own);
+    expect(screen.queryByRole('dialog')).toBeNull();
+    expect(screen.queryByRole('menu')).toBeNull();
+  });
+
+  it('excuses the focus going to the pressed cell, and no other', async () => {
+    renderMonth(plan(2));
+    await openForm('A', MONDAY);
+    fireEvent.mouseDown(cell('A', MONDAY)); // the mouse is down on the cell of the form
+    act(() => cell('B', MONDAY).focus()); // and the focus goes elsewhere, say by a key
+    expect(screen.queryByRole('dialog')).toBeNull();
+    expect(cell('B', MONDAY)).toHaveFocus();
+  });
+
+  it('gives way to the list of another cell that is clicked', async () => {
+    renderMonth(plan(2));
+    await openForm('A', MONDAY);
+    await userEvent.click(cell('B', MONDAY));
+    expect(screen.queryByRole('dialog')).toBeNull();
+    expect(screen.getByRole('menu', { name: 'Operátor B · 4. 1.' })).toBeInTheDocument();
+    expect(cell('A', MONDAY)).toHaveAttribute('aria-expanded', 'false');
+  });
+
+  it('closes on a click on the heading of the month, and on the coverage row', async () => {
+    renderMonth(plan(2));
+    await openForm('A', MONDAY);
+    await userEvent.click(screen.getByRole('heading', { name: 'Leden 2027' }));
+    expect(screen.queryByRole('dialog')).toBeNull();
+    await openForm('A', MONDAY);
+    await userEvent.click(screen.getByTestId('coverage-2027-01-05'));
+    expect(screen.queryByRole('dialog')).toBeNull();
+    expect(screen.queryByRole('menu')).toBeNull();
+  });
+
+  it('closes on a Shift+Tab onto its cell, though the cell was pressed before', async () => {
+    renderMonth(plan(2));
+    await openForm('A', MONDAY);
+    fireEvent.mouseDown(cell('A', MONDAY));
+    fireEvent.mouseUp(document.body); // let go elsewhere: no click on the cell, the form is open
+    expect(dialog()).toBeInTheDocument();
+    act(() => fromBox().focus());
+    await userEvent.tab({ shift: true });
+    expect(screen.queryByRole('dialog')).toBeNull();
+    expect(cell('A', MONDAY)).toHaveFocus();
+  });
+
   it('starts from the list of codes each time the menu opens', async () => {
     renderMonth(plan(2));
     await openForm('A', MONDAY);
