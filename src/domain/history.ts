@@ -5,6 +5,9 @@ import type { AppData, FairnessCounts, MonthKey, PersonId, StoredCell } from './
 
 const noCounts = (): FairnessCounts => ({ twelve: 0, nights: 0, holidayTwelve: 0, festive: 0 });
 
+/** The most months the fairness history looks back over, whatever `fairnessWindowMonths` says. */
+const MAX_LOOK_BACK = 24;
+
 /** The sum of two sets of counts, field by field. */
 export function addCounts(a: FairnessCounts, b: FairnessCounts): FairnessCounts {
   return {
@@ -32,8 +35,8 @@ export function isClaimed(cell: StoredCell | undefined, day: DayInfo): boolean {
 }
 
 /**
- * The counts that W7 balances, for one person over the days of `month`. They are read from the
- * stored cells, so a draft counts as much as a finished month:
+ * The counts that W7 balances, for one person over the days of `month`, read from the cells stored
+ * for it, whatever the status of the month (`historyCounts` decides which months to ask for):
  *
  * - `twelve`: R12 and N12, but not a claimed holiday shift;
  * - `nights`: N and N12;
@@ -61,14 +64,24 @@ export function monthCounts(data: AppData, month: MonthKey, personId: PersonId):
 
 /**
  * What the person has already worked, as far as W7 is concerned, when `month` is planned: the sum
- * of `monthCounts` over the `settings.fairnessWindowMonths` months before `month`. Every month of
- * the window counts as stored, a draft too, and one that has no record in `data.months` as well.
- * The starting counts of the person are not in it.
+ * of `monthCounts` over the planned months among the `settings.fairnessWindowMonths` months before
+ * `month`. The window is at most 24 months, whatever the setting says, and 0 or less means none.
+ *
+ * A planned month is one with a record in `data.months`: the app writes it when it generates a
+ * month, and a closed month has one too. A draft counts as much as a closed month. A month without
+ * a record does not count, whatever its cells hold: it holds requests, or only the last days of an
+ * earlier month entered as context (the December tail of a January). The starting counts of the
+ * person stand for what came before the first planned month of the file, and most likely cover
+ * those days, so counting them again would count them twice. The starting counts are not in the
+ * result.
  */
 export function historyCounts(data: AppData, month: MonthKey, personId: PersonId): FairnessCounts {
+  const lookBack = Math.min(Math.max(data.settings.fairnessWindowMonths, 0), MAX_LOOK_BACK);
   let total = noCounts();
-  for (let back = 1; back <= data.settings.fairnessWindowMonths; back++) {
-    total = addCounts(total, monthCounts(data, addMonths(month, -back), personId));
+  for (let back = 1; back <= lookBack; back++) {
+    const earlier = addMonths(month, -back);
+    if (!Object.hasOwn(data.months, earlier)) continue;
+    total = addCounts(total, monthCounts(data, earlier, personId));
   }
   return total;
 }

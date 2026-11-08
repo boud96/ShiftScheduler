@@ -319,6 +319,7 @@ describe('the limits, claimed holidays, notes and history of each person', () =>
 
   it('history adds starting counts and earlier months', () => {
     const data = newAppData();
+    data.months['2027-01'] = { status: 'draft' };
     data.people[0].startingCounts = { twelve: 2, nights: 1, holidayTwelve: 1, festive: 3 };
     data.cells['2027-01-01'] = { p1: { code: 'R12', pinned: true } }; // claimed: no twelve
     data.cells['2027-01-02'] = { p1: { code: 'R12' } };
@@ -332,7 +333,7 @@ describe('the limits, claimed holidays, notes and history of each person', () =>
     expect(data).toEqual(before); // the starting counts are not added to in place
   });
 
-  it('history is the starting counts alone when no earlier month holds a shift', () => {
+  it('history is the starting counts alone when no earlier month was planned', () => {
     const data = newAppData();
     const starting = { twelve: 2, nights: 1, holidayTwelve: 1, festive: 3 };
     data.people[0].startingCounts = { ...starting };
@@ -340,8 +341,27 @@ describe('the limits, claimed holidays, notes and history of each person', () =>
     expect(peopleOf(data)[0].history).toEqual(starting);
   });
 
+  it('history leaves out a December tail that has no record, and takes it in with one', () => {
+    const data = newAppData();
+    const starting = { twelve: 2, nights: 1, holidayTwelve: 1, festive: 3 };
+    data.people[0].startingCounts = { ...starting };
+    data.cells['2026-12-25'] = { p1: { code: 'R12' } }; // the tail, entered as context for January
+    data.cells['2026-12-31'] = { p1: { code: 'N' } };
+    data.cells['2027-01-02'] = { p1: { code: 'R12' } }; // the month itself
+    expect(peopleOf(data)[0].history).toEqual(starting);
+    data.months['2026-12'] = { status: 'draft' }; // planned after all: Christmas and New Year count
+    expect(peopleOf(data)[0].history).toEqual({
+      twelve: 3,
+      nights: 2,
+      holidayTwelve: 2,
+      festive: 5,
+    });
+  });
+
   it('history follows the fairness window of the settings', () => {
     const data = newAppData();
+    data.months['2027-01'] = { status: 'draft' };
+    data.months['2027-02'] = { status: 'closed' };
     data.cells['2027-01-02'] = { p1: { code: 'R12' } };
     data.cells['2027-02-06'] = { p1: { code: 'R12' } };
     data.settings.fairnessWindowMonths = 1;

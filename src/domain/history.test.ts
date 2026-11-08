@@ -3,7 +3,15 @@ import { monthDays, monthOf } from './calendar';
 import type { DayInfo } from './calendar';
 import { defaultSettings, newAppData } from './defaults';
 import { addCounts, historyCounts, isClaimed, monthCounts } from './history';
-import type { AppData, CodeName, FairnessCounts, ISODate, PersonId, StoredCell } from './types';
+import type {
+  AppData,
+  CodeName,
+  FairnessCounts,
+  ISODate,
+  MonthKey,
+  PersonId,
+  StoredCell,
+} from './types';
 
 const NONE: FairnessCounts = { twelve: 0, nights: 0, holidayTwelve: 0, festive: 0 };
 const counts = (patch: Partial<FairnessCounts>): FairnessCounts => ({ ...NONE, ...patch });
@@ -11,6 +19,11 @@ const counts = (patch: Partial<FairnessCounts>): FairnessCounts => ({ ...NONE, .
 /** Stores `code` for person `id` on `date`; a pinned cell carries `pinned: true`. */
 function put(data: AppData, date: ISODate, id: PersonId, code: CodeName, pinned = false): void {
   (data.cells[date] ??= {})[id] = pinned ? { code, pinned } : { code };
+}
+
+/** Gives each of `months` a record, as the app does for a month it has planned (a draft). */
+function planMonths(data: AppData, ...months: MonthKey[]): void {
+  for (const month of months) data.months[month] = { status: 'draft' };
 }
 
 /** The day `date` as the calendar describes it, with `dayTypeOverrides` of the settings. */
@@ -22,6 +35,7 @@ function dayOf(date: ISODate, overrides: Record<ISODate, 'weekday' | 'twelve'> =
 describe('historyCounts', () => {
   it('counts January when February is built', () => {
     const data = newAppData();
+    planMonths(data, '2027-01');
     put(data, '2027-01-02', 'p1', 'R12'); // Saturday
     put(data, '2027-01-09', 'p1', 'R12'); // Saturday
     put(data, '2027-01-04', 'p1', 'N');
@@ -32,6 +46,7 @@ describe('historyCounts', () => {
 
   it('leaves out months beyond the fairness window', () => {
     const data = newAppData();
+    planMonths(data, '2026-12', '2027-01');
     put(data, '2026-12-05', 'p1', 'R12'); // Saturday, two months before February
     put(data, '2027-01-02', 'p1', 'R12'); // Saturday, the month before
     data.settings.fairnessWindowMonths = 1;
@@ -42,6 +57,7 @@ describe('historyCounts', () => {
 
   it('looks back 6 months by default, across the turn of a year', () => {
     const data = newAppData();
+    planMonths(data, '2026-07', '2026-08', '2026-12');
     put(data, '2026-07-03', 'p1', 'N'); // 7 months before February 2027
     put(data, '2026-08-03', 'p1', 'N'); // 6 months before
     put(data, '2026-12-08', 'p1', 'N');
@@ -49,32 +65,71 @@ describe('historyCounts', () => {
     expect(historyCounts(data, '2027-02', 'p1').nights).toBe(2);
   });
 
-  it('counts nothing when the window is 0 months', () => {
+  it.each([0, -3])('counts nothing when the window is %i months', (months) => {
     const data = newAppData();
+    planMonths(data, '2027-01');
     put(data, '2027-01-05', 'p1', 'N');
-    data.settings.fairnessWindowMonths = 0;
+    data.settings.fairnessWindowMonths = months;
     expect(historyCounts(data, '2027-02', 'p1')).toEqual(NONE);
+  });
+
+  it('clamps a window above 24 months to 24', () => {
+    const data = newAppData();
+    planMonths(data, '2027-02', '2027-03');
+    put(data, '2027-02-02', 'p1', 'N'); // 25 months before March 2029
+    put(data, '2027-03-02', 'p1', 'N'); // 24 months before
+    for (const months of [24, 25, 1000]) {
+      data.settings.fairnessWindowMonths = months;
+      expect(historyCounts(data, '2029-03', 'p1').nights, `a window of ${months}`).toBe(1);
+    }
   });
 
   it('does not count the month itself, nor the months after it', () => {
     const data = newAppData();
+    planMonths(data, '2027-02', '2027-03');
     put(data, '2027-02-02', 'p1', 'N');
     put(data, '2027-03-02', 'p1', 'N');
     expect(historyCounts(data, '2027-02', 'p1')).toEqual(NONE);
   });
 
-  it('counts a draft, a closed month and a month with no record alike', () => {
+  it('counts a draft month and a closed month alike', () => {
     const data = newAppData();
     data.months['2027-01'] = { status: 'draft' };
     data.months['2026-12'] = { status: 'closed' };
     put(data, '2027-01-05', 'p1', 'N');
     put(data, '2026-12-08', 'p1', 'N');
-    put(data, '2026-11-10', 'p1', 'N'); // November has no entry in data.months
-    expect(historyCounts(data, '2027-02', 'p1').nights).toBe(3);
+    expect(historyCounts(data, '2027-02', 'p1').nights).toBe(2);
+  });
+
+  it('does not count a month that has cells but no record', () => {
+    const data = newAppData();
+    put(data, '2027-01-02', 'p1', 'R12');
+    put(data, '2027-01-05', 'p1', 'N');
+    expect(historyCounts(data, '2027-02', 'p1')).toEqual(NONE);
+    planMonths(data, '2027-01'); // once the month is planned, the same cells count
+    expect(historyCounts(data, '2027-02', 'p1')).toEqual(counts({ twelve: 1, nights: 1 }));
+  });
+
+  it('counts the months that have a record, and only those, within the window', () => {
+    const data = newAppData();
+    planMonths(data, '2026-11', '2027-01'); // December has none
+    put(data, '2026-11-10', 'p1', 'N');
+    put(data, '2026-12-08', 'p1', 'N');
+    put(data, '2027-01-05', 'p1', 'N');
+    expect(historyCounts(data, '2027-02', 'p1').nights).toBe(2);
+  });
+
+  it('leaves out the tail of December that January has as context: December has no record', () => {
+    const data = newAppData();
+    put(data, '2026-12-25', 'p1', 'R12'); // Friday, a holiday
+    put(data, '2026-12-26', 'p1', 'N12'); // Saturday, a holiday
+    put(data, '2026-12-31', 'p1', 'N');
+    expect(historyCounts(data, '2027-01', 'p1')).toEqual(NONE);
   });
 
   it('counts only the cells of the person asked for', () => {
     const data = newAppData();
+    planMonths(data, '2027-01');
     put(data, '2027-01-05', 'p1', 'N');
     put(data, '2027-01-05', 'p2', 'N');
     put(data, '2027-01-06', 'p2', 'N');
@@ -86,6 +141,7 @@ describe('historyCounts', () => {
 
   it('adds the months up, field by field', () => {
     const data = newAppData();
+    planMonths(data, '2026-12', '2027-01');
     put(data, '2026-12-24', 'p1', 'N12'); // a holiday and a festive day
     put(data, '2026-12-30', 'p1', 'R1');
     put(data, '2027-01-02', 'p1', 'R12'); // Saturday
@@ -100,12 +156,14 @@ describe('historyCounts', () => {
 
   it('does not count a claimed holiday shift as twelve', () => {
     const data = newAppData();
+    planMonths(data, '2027-01');
     put(data, '2027-01-01', 'p1', 'R12', true);
     expect(historyCounts(data, '2027-02', 'p1')).toEqual(counts({ holidayTwelve: 1, festive: 1 }));
   });
 
   it('does count a holiday shift that nobody has claimed as twelve', () => {
     const data = newAppData();
+    planMonths(data, '2027-01');
     put(data, '2027-01-01', 'p1', 'R12'); // not pinned
     expect(historyCounts(data, '2027-02', 'p1')).toEqual(
       counts({ twelve: 1, holidayTwelve: 1, festive: 1 }),
@@ -114,6 +172,7 @@ describe('historyCounts', () => {
 
   it('does not change the data', () => {
     const data = newAppData();
+    planMonths(data, '2027-01');
     put(data, '2027-01-01', 'p1', 'R12', true);
     const before = structuredClone(data);
     historyCounts(data, '2027-02', 'p1');

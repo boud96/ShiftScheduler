@@ -44,7 +44,7 @@ export interface EnginePerson {
   doctorTo: Int16Array;
   /**
    * Fairness counts brought in from the months before: the starting counts of the person plus the
-   * counts of the earlier months in the fairness window (see `historyCounts`).
+   * counts of the earlier planned months in the fairness window (see `historyCounts`).
    */
   history: FairnessCounts;
   /**
@@ -125,7 +125,7 @@ function membersOf(data: AppData, days: DayInfo[]): Member[] {
  *
  * Beside the rows, each person carries what the rules need to know of them: their limits, the days
  * of their claimed holiday shifts, their doctor's notes, and the fairness counts of the months
- * before (their starting counts plus the earlier months of the file, drafts included).
+ * before (their starting counts plus the earlier planned months of the file, drafts included).
  */
 export function buildMonthGrid(data: AppData, month: MonthKey): MonthGrid {
   const { settings } = data;
