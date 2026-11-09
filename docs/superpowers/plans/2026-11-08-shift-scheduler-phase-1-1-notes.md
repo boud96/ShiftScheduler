@@ -10,7 +10,7 @@ Some of the rulings go beyond the spec or change the plan:
 - R31: the weekend minimum (M12) gives way to a person's own maximum of 12-hour shifts.
 - R32: a save file with a doctor's note of a person who is not in the team opens, with the note dropped.
 
-## Rulings (R1–R36)
+## Rulings (R1–R38)
 
 Each ruling says what was decided, why, and what it costs if the decision was wrong.
 
@@ -50,6 +50,8 @@ Each ruling says what was decided, why, and what it costs if the decision was wr
 - R34: `q1-2027` asserts `Musí: 0` (no must unit) for every month only if a sweep over seeds 1–24 at the scenario's own number of iterations is 24 of 24; otherwise the rate is reported and the assertion left out. Why: the final reviewer found 24 of 24 months clean at 600,000 iterations on seeds 1–8, but the scenario's count may differ. Cost if wrong: M6 and M12 stay unpinned for a realistic quarter. The sweep over seeds 1–24 at 300,000 iterations was 24 of 24 (72 months with no must unit), so the assertion is in; the other scenarios gave the counts they gave before the fix wave.
 - R35: The ten points that the final review declined to judge all stay declined, as it reasoned. They are: M12 for people who cannot reach the minimum (a month of leave); a holiday pin that is always a claim; a raised personal maximum of 12-hour shifts that allows extra weekends but does not produce them; settings of a hand-edited file that are not type-checked; STRONG that beats the gains of one night and not every combination; a boundary horizon of one day into the next month; W10 collisions without a line in `Kontrola`; no screen for the running counts or for dropping a month's record (Phase 2); a quarter's 12-hour spread of 2 (R12); and a Phase 1 and a Phase 1.1 build that share the cache key `shift-scheduler/v1`. The first three go to the team lead as questions, and the second also gets a line in the README; the last goes to the user as "use only the newest build file". Cost if wrong: those named in the questions below.
 - R36: The final fix wave takes the one Important finding and the seven Minor ones of the final review, every parked minor marked as a candidate for the wave by Tasks 6 to 10 and 6b (R30 among them), two cheap guards on HARD rules (the negative `restBefore` of Task 3 and the claimed N12 as a night of Task 4), and the docs pass with this file. The other parked minors (refactors, file splits, comments, nits of speed) stay open and are listed below. Why: one fix dispatch, kept to defects, guards and docs. Cost if wrong: the refactors wait for Phase 2.
+- R37: In a paste, a first column that holds only an `L` and words (`L dopoledne`, L morning) is still taken for names: only an `L` followed by a digit counts as a day value there. Why: the team lead writes notes with the time (R19), the paste dialog says that the first column is left out, and a broader rule (an `L` and a space) would take a name written with an initial for a day. Cost if wrong: such a paste shifts by one day, with the dialog's warning shown.
+- R38: The fix wave's extras are accepted: `isBelowFpd` is also used by the first draft (`construct.ts`) and the totals (`Grid.tsx`), and `FPD_TOLERANCE` is private; the e2e click on another cell presses the 18th cell after a hit test, since the 25th lies under the totals at 1280 × 720; R30 and the skipped repair are pinned by tests behind a call-through `vi.mock('./repair')` in `search.test.ts`. Why: each follows the brief's intent and is tested. Cost if wrong: two hunks to revert.
 
 ## Open items
 
@@ -77,7 +79,9 @@ The parked minors that the final fix wave did not take, one line each with its f
 - `src/ui/team/TeamScreen.test.tsx`: 200 lines of limits tests, and the helpers `enter`, `paste` and `put` copied across the form, Team and Rules tests; a `TeamScreen.limits.test.tsx` and shared helpers. Its title at `:691` says "null is stored, once" but counts nothing.
 - `src/ui/team/PersonCard.tsx:37` (`MAX_TWELVE_LIMIT`) and `src/ui/rules/RulesScreen.tsx:66-70` (`max={10}`): the ceiling of the 12h limit is written twice.
 - `src/clipboard/tsv.test.ts`: over 1,000 lines; the doctor tests could be `tsv.doctor.test.ts`.
-- `src/clipboard/tsv.ts` (`hasNamesColumn`): a first column that holds only an `L` and words (`L dopoledne`, L morning) is still taken for names, since only an `L` followed by a digit counts as a day value. The dialog says so (`První sloupec vypadá jako jména, vynechá se.`).
+- `src/clipboard/tsv.ts` (`hasNamesColumn`): a first column that holds only an `L` and words (`L dopoledne`, L morning) is still taken for names, since only an `L` followed by a digit counts as a day value (R37). The dialog says so (`První sloupec vypadá jako jména, vynechá se.`). No test pins this case.
+- `src/ui/month/CellMenu.tsx`: since the fix wave, a right press on the open form's own cell no longer counts as a press on its anchor, so in a real browser it closes the form, as intended. No test pins it: jsdom does not move the focus on a press, and no e2e spec right-clicks.
+- `src/generator/repair.ts`: the stop is asked before each trade, not inside the sets and chains that follow one, so a capped repair can run one such pass past its 200 ms (R27, R29, R30 as designed).
 
 ## Questions for the team lead
 
@@ -85,8 +89,11 @@ The parked minors that the final fix wave did not take, one line each with its f
 - Is "a holiday pin is always a claim" still right? A pin made only to keep a generated holiday shift on the next run also takes that shift out of the counts of M5 and M12 (the figure `3+1` and its title show it).
 - Do the colleagues who offered more weekends need a per-person target? A raised maximum of 12-hour shifts allows more but does not produce them: W5a's target and W7 pull the person back to the team's count.
 - W7 lets the 12-hour shifts of a quarter differ by 2 between people on most seeds (R12). Is that fair enough, or should W7 weigh more across the quarter?
-- The share of moves that change the count of shifts (`set`, `shiftMove`) in the annealing went from 0.2 to 0.1 each in Task 6. A tuning pass, measured on March after generated tails at short budgets, might make 5 s reliable again.
+- How fast is the laptop the plan will be made on, against the 20 s default of `Čas na generování (s)` (Time to generate, s)? The default was checked on a fast desktop (20 of 20 quarters clean at 20 s); no test covers a laptop that is 2–4 times slower.
+
+## Follow-ups for the developer
+
+- The share of moves that change the count of shifts (`set`, `shiftMove`) in the annealing went from 0.2 to 0.1 each in Task 6. A tuning pass, measured on March after generated tails at short budgets, might make short budgets more reliable still.
 - The trade step of the repair runs even when a plain `set` would already gain (about 0.7 s a pass on a draft with open rows, at most 70.5 ms a call at the end of a real segment). A gate would change the candidates of R25 and need new runs. Is it worth it?
-- How fast is the team lead's laptop against the 20 s default of `Čas na generování (s)` (Time to generate, s)? The default was checked on a fast desktop (20 of 20 quarters clean at 20 s, and at 10 s); no test covers a laptop that is 2–4 times slower.
 - The manual checks of the README have not been run yet in Firefox and Edge (the doctor's form with a real keyboard, a typo in a limit box, `35,5` and `10,5` with the decimal comma, the paste of a note from a real Excel). They are listed under "Manual checks before handing out a build".
 - Use only the newest build file. A Phase 1 build and a Phase 1.1 build opened in one browser share the cache key `shift-scheduler/v1`: the older build refuses the newer cache, and can then overwrite it. The save file is the real store.

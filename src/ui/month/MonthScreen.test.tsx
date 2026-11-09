@@ -1551,7 +1551,7 @@ describe('the totals of a person', () => {
       expect(checks().getByText('Operátor B: 2 víkendové směny (min. 3)')).toBeVisible();
     });
 
-    it('not for a person at their own maximum, when that is below the minimum (R31)', () => {
+    it('not for a person at their own maximum, when that is below the minimum (R31 of Phase 1.1)', () => {
       const data = plan(3);
       data.people[0].maxTwelve = 1; // A may work one 12-hour shift: one weekend shift is enough
       data.people[1].maxTwelve = 0; // B none at all: nothing is asked of B

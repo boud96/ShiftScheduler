@@ -25,7 +25,8 @@ export type Action =
   /**
    * Stores the doctor's note of a person on a day beside the day's cell, which it does not touch;
    * null deletes the note. A person who is not in the team, and a note that is not a time span of
-   * one day, are ignored: the save file drops the note of the first, and is refused with the other.
+   * one day, are ignored: the save file drops the note of the first, and a file holding the second
+   * is refused.
    */
   | { type: 'setDoctor'; date: ISODate; personId: PersonId; note: DoctorNote | null }
   /** Pins a shift, or unpins a pinned one. Any other cell is left as it is. */

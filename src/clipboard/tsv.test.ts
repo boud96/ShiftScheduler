@@ -792,7 +792,7 @@ describe("planPaste, doctor's notes", () => {
     });
     it('is names when its values are words, also words that start with an L', () => {
       const { d, ids } = team();
-      const plan = planJan(d, ids[0], jan(1), 'Lenka\tx\nL. Novák\tR1\nLadislav\tDOV');
+      const plan = planJan(d, ids[0], jan(1), 'Levandule\tx\nL. Testová\tR1\nLucerna\tDOV');
       expect(plan.namesColumn).toBe(true);
       expect(plan.writes).toEqual([
         { personId: ids[0], date: jan(1), code: 'x' },

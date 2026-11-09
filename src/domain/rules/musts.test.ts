@@ -664,9 +664,10 @@ describe("a person's own maximum of 12-hour shifts, in detail", () => {
   });
 });
 
-// R31: the HARD maximum of 12-hour shifts wins over the minimum of weekend shifts, so a person is
-// never asked for more weekend shifts than they may work 12-hour shifts. February 2027: its
-// weekends are days 5-6, 12-13, 19-20 and 26-27 (counted from 0), and the minimum is 2.
+// R31 of Phase 1.1 (see its notes): the HARD maximum of 12-hour shifts wins over the minimum of
+// weekend shifts, so a person is never asked for more weekend shifts than they may work 12-hour
+// shifts. February 2027: its weekends are days 5-6, 12-13, 19-20 and 26-27 (counted from 0), and
+// the minimum is 2.
 describe("M12 against a person's own maximum of 12-hour shifts", () => {
   const m12 = (maxTwelve: number | null, ...strips: string[]) =>
     found(ctxFor('2027-02', [{ maxTwelve }]), 'M12', ...strips);

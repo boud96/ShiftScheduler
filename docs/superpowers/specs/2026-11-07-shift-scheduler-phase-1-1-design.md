@@ -97,7 +97,7 @@ In this section a **weekend shift** means every twelve-hour shift: an R12 or N12
 - It applies to everyone, including people who join or leave during the month.
 - If someone has `x` on some weekends, they get their shifts on the other weekends.
 - If a person's own requests make 2 impossible, the generator leaves it short and Kontrola shows it in red, as it does for hours below FPD. The generator never breaks a hard must to reach it.
-- A maximum of 12-hour shifts below 2, the person's own (§3.6) or the general one, lowers the minimum to that maximum, because the hard maximum wins over a minimum that may be left short; Kontrola then quotes the lowered value (for example `min. 1`) in place of a red line every month that nothing could clear.
+- A maximum of 12-hour shifts below 2, the person's own (§3.6) or the general one, lowers the minimum to that maximum, because the hard maximum wins over a minimum that may be left short. A person at that maximum then gets no M12 line, where before they got a red line every month that nothing could clear; a person below it gets a line that quotes the lowered value (for example `min. 1`).
 
 **Claiming a holiday.**
 - Holiday shifts pay a bonus, so they are popular.

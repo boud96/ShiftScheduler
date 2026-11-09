@@ -151,9 +151,9 @@ function hasNamesColumn(rows: string[][]): boolean {
  * `parseDoctor`) to `doctorWrites`, both under the same rules: the same people and the same days. A
  * value that is neither, and a value that has no person (a row beyond the last person, or a start
  * person who is not in the month grid) or no valid date, is listed in `ignored`. A first column
- * holding only values that are neither codes nor notes nor start like a note (an `L` and a digit),
- * and at least one, is taken for names and left out, unlisted; `namesColumn` says so. `data` is
- * not changed.
+ * holding at least one value, and only values that are not codes, are not notes and do not start
+ * like a note (an `L` and a digit), is taken for names and left out, unlisted; `namesColumn` says
+ * so. `data` is not changed.
  */
 export function planPaste(
   data: AppData,
