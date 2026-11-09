@@ -5,7 +5,7 @@ import { buildMonthGrid } from '../domain/context';
 import type { MonthGrid } from '../domain/context';
 import { newAppData, newPerson } from '../domain/defaults';
 import { evaluateMonth } from '../domain/rules/evaluate';
-import { FPD_TOLERANCE } from '../domain/rules/personMusts';
+import { isBelowFpd } from '../domain/rules/personMusts';
 import { HARD } from '../domain/rules/weights';
 import type { CodeName, ISODate } from '../domain/types';
 import { shortFebruary } from '../test/shortFebruary';
@@ -98,8 +98,7 @@ const stateOf = (g: MonthGrid) => new SearchState(g.ctx, g.rows, g.fixed);
 /** The index in `ctx.days` of a date. */
 const dayOf = (g: MonthGrid, date: ISODate) => g.ctx.days.findIndex((day) => day.date === date);
 /** Whether person `p` is below FPD, as M6 judges it. */
-const short = (st: SearchState, p: number) =>
-  st.ctx.people[p].fpd - st.statsOf(p).hours > FPD_TOLERANCE;
+const short = (st: SearchState, p: number) => isBelowFpd(st.ctx.people[p], st.statsOf(p).hours);
 /** The broken musts that cost HARD, one line each. */
 const hard = (g: MonthGrid, rows: Uint8Array[]) =>
   evaluateMonth(g.ctx, rows, true)

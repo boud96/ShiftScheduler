@@ -79,8 +79,9 @@ const END_TEMPERATURE = 0.3;
 /** With a time budget, the clock is read every this many iterations and at each report. */
 const CLOCK_EVERY = 256;
 /**
- * With a time budget, how far past it the repair of the hours may go: it tries no new trade once
- * the search has run this many milliseconds longer than the budget.
+ * With a time budget, how long the repair of the hours may go on after the search should have
+ * ended: it tries no new trade once the search has run this many milliseconds longer than the
+ * budget, or than a stop that comes before the budget is spent.
  */
 const REPAIR_OVERRUN_MS = 200;
 
@@ -141,10 +142,12 @@ function pause(): Promise<void> {
  * At the end of each segment that ran, and when it stops early, `repairHours` repairs the best
  * month so far: it gives someone below FPD a shift that the annealing cannot reach, behind a
  * valley of the score. The next segment starts from the repaired month, so its wishes are
- * annealed again. A best month with no must unit has nobody below FPD, and is left as it is. With
+ * annealed again. A best month with no must unit has nobody below FPD, and is left as it is, and
+ * so is one that has been repaired and has not changed since: the repair would find nothing. With
  * a time budget the repair tries no new trade once the search has run REPAIR_OVERRUN_MS past the
- * budget; without one it reads no clock, and the result stays a function of the inputs, the seed
- * and `maxIterations`.
+ * budget, or, when the search is stopped before the budget is spent, REPAIR_OVERRUN_MS past the
+ * stop. Without a budget it reads no clock, and the result stays a function of the inputs, the
+ * seed and `maxIterations`.
  */
 export async function search(
   ctx: MonthContext,
@@ -175,19 +178,26 @@ export async function search(
     mustUnits: bestMustUnits,
     iterations: done,
   });
-  // With a time budget the repair stops when the search's own out-of-time check would say it is
-  // REPAIR_OVERRUN_MS past the budget.
-  const repairStop =
+  // With a time budget the repair at the end of a segment stops when the search's own out-of-time
+  // check would say it is REPAIR_OVERRUN_MS past the budget.
+  const afterBudget =
     budget === undefined ? undefined : stopAfter(started, budget + REPAIR_OVERRUN_MS);
-  /** Repairs the hours of the best month so far, if it has a must unit, and keeps what it gains. */
-  const repair = (): void => {
-    if (bestMustUnits === 0) return;
+  // Whether the best month has been repaired since it last changed. The repair is deterministic and
+  // ends only when no change gains, so repairing the month again would find nothing.
+  let repaired = false;
+  /**
+   * Repairs the hours of the best month so far, if it has a must unit and has changed since it was
+   * last repaired, and keeps what it gains. `stop` ends the repair, as for `repairHours`.
+   */
+  const repair = (stop: (() => boolean) | undefined): void => {
+    if (bestMustUnits === 0 || repaired) return;
     st.reset(best);
-    if (repairHours(st, repairStop) > 0) {
+    if (repairHours(st, stop) > 0) {
       bestScore = st.score;
       bestMustUnits = st.mustUnits;
       st.snapshot(best);
     }
+    repaired = true;
   };
 
   // With a time budget, segment k has the time from k to k + 1 times `segmentMs` after `begin`.
@@ -218,6 +228,7 @@ export async function search(
             bestScore = st.score;
             bestMustUnits = st.mustUnits;
             st.snapshot(best);
+            repaired = false;
           }
         } else {
           st.revert();
@@ -239,13 +250,19 @@ export async function search(
         });
         const outOfTime = budget !== undefined && elapsedMs >= budget;
         if (opts.shouldStop?.() === true || outOfTime) {
-          repair();
+          // out of time, the repair has until REPAIR_OVERRUN_MS past the budget; stopped by the
+          // user, it has REPAIR_OVERRUN_MS from the stop
+          repair(
+            budget === undefined
+              ? undefined
+              : stopAfter(started, Math.min(budget, elapsedMs) + REPAIR_OVERRUN_MS),
+          );
           return result();
         }
       }
     }
     // a segment whose time was up before it began found nothing new to repair
-    if (done > doneBefore) repair();
+    if (done > doneBefore) repair(afterBudget);
   }
   return result();
 }

@@ -8,7 +8,7 @@ import {
   isTwelveShift,
   isWeekdayShift,
 } from '../codes';
-import type { MonthContext } from '../context';
+import type { EnginePerson, MonthContext } from '../context';
 import { fmtH, nightShifts, shortDate, twelveShifts, weekendShifts } from '../format';
 import type { Settings, ShiftName } from '../types';
 import { monthNights } from './personWishes';
@@ -17,7 +17,15 @@ import { BELOW_FPD, HARD, STRONG, WEEKEND_SHORT } from './weights';
 
 const MINUTES_PER_DAY = 1440;
 /** A shortfall this small (in hours) is rounding noise in the sum of the hours, not a shortfall. */
-export const FPD_TOLERANCE = 1e-9;
+const FPD_TOLERANCE = 1e-9;
+
+/**
+ * Whether a person who has `hours` in the month is below their FPD, as M6 judges it: not by the
+ * rounding error of a sum. Whoever asks the same question (the repair, the totals) asks it here.
+ */
+export function isBelowFpd(person: Pick<EnginePerson, 'fpd'>, hours: number): boolean {
+  return person.fpd - hours > FPD_TOLERANCE;
+}
 
 /** The minutes of rest between shift `a` and shift `b` on the day after it. */
 function restBetween(shifts: Settings['shifts'], a: number, b: number): number {
@@ -143,6 +151,7 @@ export function personMusts(
       }
     } else if (isNight(a) && (b === Code.X || isAbsence(b))) {
       // M4: a night ends in the morning of the next day, which must not be a request or an absence.
+      // `breaksHardMust` (generator/moves.ts) re-implements this rule and must change with it.
       score += HARD;
       units++;
       if (sink !== undefined) {
@@ -187,6 +196,7 @@ export function personMusts(
 
   // M5: at most `maxTwelve` 12-hour shifts, HARD for each one over. A claimed holiday shift is
   // extra and counts toward nothing, so `counted` is also what M12 reads.
+  // `breaksHardMust` (generator/moves.ts) re-implements this rule and must change with it.
   const counted = stats.twelve - stats.claimedTwelve;
   const { maxTwelve } = person;
   const excess = counted - maxTwelve;
@@ -200,8 +210,8 @@ export function personMusts(
   }
 
   // M6: hours at least the person's FPD, BELOW_FPD for each hour short.
-  const short = person.fpd - stats.hours;
-  if (short > FPD_TOLERANCE) {
+  if (isBelowFpd(person, stats.hours)) {
+    const short = person.fpd - stats.hours;
     score += BELOW_FPD * short;
     units++;
     if (sink !== undefined) {
@@ -226,6 +236,7 @@ export function personMusts(
   }
 
   // M13: at most `maxNights` nights, if the person has a limit, HARD for each one over.
+  // `breaksHardMust` (generator/moves.ts) re-implements this rule and must change with it.
   const { maxNights } = person;
   if (maxNights !== null && stats.nights > maxNights) {
     const over = stats.nights - maxNights;

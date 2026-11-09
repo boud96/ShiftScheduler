@@ -1,6 +1,6 @@
 import { CODE_NAMES, Code } from '../domain/codes';
 import type { CodeInt } from '../domain/codes';
-import { FPD_TOLERANCE } from '../domain/rules/personMusts';
+import { isBelowFpd } from '../domain/rules/personMusts';
 import { HARD } from '../domain/rules/weights';
 import type { ShiftName } from '../domain/types';
 import type { Move } from './moves';
@@ -117,7 +117,7 @@ function reachFpd(st: SearchState, rnd: () => number): void {
   for (;;) {
     const moves: Move[] = [];
     for (let p = 0; p < rows.length; p++) {
-      if (ctx.people[p].fpd - st.statsOf(p).hours <= FPD_TOLERANCE) continue;
+      if (!isBelowFpd(ctx.people[p], st.statsOf(p).hours)) continue;
       for (let d = ctx.first; d < ctx.days.length; d++) {
         if (st.weekdayType[d] === 1 && fixed[p][d] === 0 && rows[p][d] === Code.EMPTY) {
           moves.push({ kind: 'set', p, d, code: Code.R2 });

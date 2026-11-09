@@ -33,6 +33,9 @@ it('the tiers keep their order', () => {
   expect(STRONG).toBeGreaterThan(WEEKEND_SHORT);
   // and no wish, at its strongest level, buys a weekend shift
   expect(WEEKEND_SHORT).toBeGreaterThan(4 * Math.max(...Object.values(BASE_WEIGHTS)));
+  // nor does W5b, which charges the k-th weekend against a person's style k² times: a month has
+  // at most 5 weekends, and the strongest level multiplies the weight by 4
+  expect(WEEKEND_SHORT).toBeGreaterThan(4 * 25 * BASE_WEIGHTS.W5b);
 });
 
 it('weighs all 16 wishes, and the default levels leave the base weights as they are', () => {

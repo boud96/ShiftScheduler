@@ -7,7 +7,7 @@ import {
   isWeekdayShift,
 } from '../domain/codes';
 import type { CodeInt } from '../domain/codes';
-import { FPD_TOLERANCE } from '../domain/rules/personMusts';
+import { isBelowFpd } from '../domain/rules/personMusts';
 import { RANGE_MAX, RANGE_MIN, breaksHardMust } from './moves';
 import type { Move } from './moves';
 import type { SearchState } from './state';
@@ -284,7 +284,7 @@ export function repairHours(st: SearchState, stop?: () => boolean): number {
   for (;;) {
     const pass = new Pass(st, stop);
     for (let a = 0; a < st.rows.length && !pass.stopped; a++) {
-      if (st.ctx.people[a].fpd - st.statsOf(a).hours > FPD_TOLERANCE) pass.person(a);
+      if (isBelowFpd(st.ctx.people[a], st.statsOf(a).hours)) pass.person(a);
     }
     if (pass.stopped || pass.plan.length === 0) return made;
     for (const m of pass.plan) {

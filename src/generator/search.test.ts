@@ -1,5 +1,6 @@
 // src/generator/search.test.ts
-import { describe, it, expect } from 'vitest';
+import { afterEach, describe, it, expect, vi } from 'vitest';
+import type { MockInstance } from 'vitest';
 import { newAppData } from '../domain/defaults';
 import { buildMonthGrid } from '../domain/context';
 import { evaluateMonth } from '../domain/rules/evaluate';
@@ -10,6 +11,7 @@ import { breaksHardMust, leavesTooLittleRest, proposeMove } from './moves';
 import type { Move } from './moves';
 import { construct } from './construct';
 import { search } from './search';
+import { repairHours } from './repair';
 import { mulberry32 } from './rng';
 import type { MonthContext, MonthGrid } from '../domain/context';
 import { HARD } from '../domain/rules/weights';
@@ -18,6 +20,12 @@ import type { CodeName, PersonId, Settings } from '../domain/types';
 import { scenario } from '../test/scenarios';
 import type { ScenarioName } from '../test/scenarios';
 import { januaryApplied } from '../test/shortFebruary';
+
+// The repair runs as it always does; the tests of `repair of the hours` look at what it is given.
+vi.mock('./repair', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('./repair')>();
+  return { ...actual, repairHours: vi.fn(actual.repairHours) };
+});
 
 const jan = () => { const d = newAppData(); d.people = syntheticTeam(); return buildMonthGrid(d, '2027-01'); };
 
@@ -704,5 +712,103 @@ describe('repair of the hours', () => {
     const musts = evaluateMonth(g.ctx, r.rows, true).findings.filter((f) => f.severity === 'must');
     const who = (person: number | null) => (person === null ? 'the day' : g.personIds[person]);
     expect(musts.map((f) => `${who(f.person)}: ${f.message}`)).toEqual([]);
+  });
+
+  // March 2027 of a new plan: with seed 8, the first draft leaves two people below FPD. (It does
+  // with seeds 1, 2, 4, 5, 6 and many more, one person each.)
+  const march = () => {
+    const { data, month } = scenario('mar2027');
+    return buildMonthGrid(data, month);
+  };
+  const SEED = 8;
+  const below = (g: MonthGrid, rows: Uint8Array[]) =>
+    evaluateMonth(g.ctx, rows, true).findings.filter((f) => f.rule === 'M6');
+
+  it('repairs the best month when the search is stopped early too', async () => {
+    const g = march();
+    const draft = new SearchState(g.ctx, g.rows, g.fixed);
+    construct(draft, mulberry32(SEED)); // the draft search(seed 8) starts from
+    expect(below(g, draft.rows)).toHaveLength(2);
+
+    // the first report stops the search, after one iteration
+    const opts = { seed: SEED, maxIterations: 1_000_000, progressEvery: 1, shouldStop: () => true };
+    const r = await search(g.ctx, g.rows, g.fixed, opts);
+    expect(r.iterations).toBe(1);
+    expect(below(g, r.rows)).toEqual([]);
+    // and the score and the must units it reports are those of the repaired month
+    const full = evaluateMonth(g.ctx, r.rows);
+    expect(r.mustUnits).toBe(full.mustUnits);
+    expect(Math.abs(r.score - full.score) / Math.max(1, full.score)).toBeLessThan(1e-9);
+  });
+
+  it('does not repair a best month again until it has changed', async () => {
+    // D can have one weekend shift at most (M12), so the best month keeps a must unit that no
+    // repair clears, and every segment ends with a best month that may be worth repairing
+    const { data, month } = scenario('x-weekends');
+    const g = buildMonthGrid(data, month);
+    const { repairHours: real } = await vi.importActual<typeof import('./repair')>('./repair');
+    const seen: Array<{ before: Uint8Array[]; after: Uint8Array[] }> = [];
+    vi.mocked(repairHours).mockImplementation((st, stop) => {
+      const before = st.snapshot();
+      const made = real(st, stop);
+      seen.push({ before, after: st.snapshot() });
+      return made;
+    });
+    try {
+      // 20 segments of 10 iterations: most of them find no better month than the best so far
+      await search(g.ctx, g.rows, g.fixed, { seed: 1, maxIterations: 200, restarts: 20 });
+    } finally {
+      vi.mocked(repairHours).mockImplementation(real);
+    }
+    expect(seen.length).toBeGreaterThan(1);
+    expect(seen.length).toBeLessThan(20);
+    // each repair after the first starts from a month that is not the one the last repair left
+    seen.slice(1).forEach(({ before }, k) => expect(before).not.toEqual(seen[k].after));
+  });
+
+  describe('with a time budget, after a stop', () => {
+    const START = 1000;
+    let clock: MockInstance | undefined;
+    afterEach(() => clock?.mockRestore());
+
+    /**
+     * Searches March 2027 with the clock held still at START ms, but for a jump of `jump` ms at the
+     * first report, so that the second report finds `jump` ms gone and stops the search. Returns
+     * the stop that the repair was given, and a way to ask it with `ms` gone since the start.
+     */
+    async function stopOfRepair(budget: number | undefined, jump: number) {
+      const g = march();
+      let now = START;
+      clock = vi.spyOn(performance, 'now').mockImplementation(() => now);
+      vi.mocked(repairHours).mockClear();
+      let asked = 0;
+      const shouldStop = () => {
+        if (++asked === 1) now += jump;
+        return asked > 1;
+      };
+      const opts = { seed: SEED, maxIterations: 1_000_000, timeBudgetMs: budget, progressEvery: 1 };
+      await search(g.ctx, g.rows, g.fixed, { ...opts, shouldStop });
+      const { calls } = vi.mocked(repairHours).mock;
+      expect(calls).toHaveLength(1);
+      const stop = calls[0][1];
+      return { stop, ask: (ms: number) => ((now = START + ms), stop?.()) };
+    }
+
+    it('ends the repair 200 ms from a stop that comes before the budget is spent', async () => {
+      const { ask } = await stopOfRepair(60_000, 3000);
+      expect([ask(0), ask(3000), ask(3199)]).toEqual([false, false, false]);
+      expect([ask(3200), ask(4000)]).toEqual([true, true]);
+    });
+
+    it('ends it 200 ms past the budget when the search is out of time', async () => {
+      const { ask } = await stopOfRepair(2000, 3000);
+      expect([ask(0), ask(2000), ask(2199)]).toEqual([false, false, false]);
+      expect([ask(2200), ask(3000)]).toEqual([true, true]);
+    });
+
+    it('gives it no stop and reads no clock without a budget', async () => {
+      const { stop } = await stopOfRepair(undefined, 3000);
+      expect(stop).toBeUndefined();
+    });
   });
 });

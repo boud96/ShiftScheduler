@@ -4,7 +4,7 @@ import { CODE_NAMES, Code, WEEKDAY_CODES, isShift } from '../../domain/codes';
 import type { MonthContext, MonthGrid } from '../../domain/context';
 import { clock, fmtH, shortDate } from '../../domain/format';
 import type { MonthEval } from '../../domain/rules/evaluate';
-import { FPD_TOLERANCE } from '../../domain/rules/personMusts';
+import { isBelowFpd } from '../../domain/rules/personMusts';
 import type { Finding, PersonStats } from '../../domain/rules/types';
 import type { AppData, ISODate, PersonId } from '../../domain/types';
 import { MONTH_SCREEN, WEEKDAY_ABBREVIATIONS } from '../text';
@@ -74,7 +74,7 @@ interface TotalsProps {
 function Totals({ id, stats, fpd, belowWeekend }: TotalsProps) {
   const { totals } = MONTH_SCREEN;
   const shifts = WEEKDAY_CODES.map((code, k) => `${CODE_NAMES[code]} ${stats.perShift[k]}`);
-  const below = fpd - stats.hours > FPD_TOLERANCE;
+  const below = isBelowFpd({ fpd }, stats.hours);
   const claimed = stats.claimedTwelve;
   return (
     <td className="month-totals" data-testid={`totals-${id}`}>
