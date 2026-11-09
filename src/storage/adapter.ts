@@ -2,18 +2,20 @@ import type { AppData } from '../domain/types';
 import { parseSaveFile, serialize } from './saveFile';
 
 /**
- * Where the app keeps its data. The save file is the real store; browser storage is only a cache
- * of it. The app always calls these through the object, so a test may replace any of them.
+ * Where the app keeps its data: in the save file, and nowhere else. The browser keeps no copy, so
+ * the page always opens at the start screen, where the user opens a file or starts a new plan. The
+ * app always calls these through the object, so a test may replace any of them.
  *
  * Which file the data goes to is the adapter's state: the one opened or saved to last. Only a click
- * of the user may make a browser show a picker or ask for write permission, so `openFile` and
- * `saveFile` are to be called from one.
+ * of the user may make a browser show a picker or ask for write permission, so `openFile`,
+ * `saveFile` and `saveFileAs` are to be called from one.
  */
 export interface StorageAdapter {
-  /** The cached data, or null when there is none or it is no good. Never changes the cache. */
-  loadCache(): AppData | null;
-  /** Keeps the data in the cache. Never throws. */
-  saveCache(d: AppData): void;
+  /**
+   * The plan the page starts with. The real page has none and starts at the start screen; a test
+   * hands one in through `memoryStorage`.
+   */
+  startData(): AppData | null;
   /**
    * The name of the file the data goes to: the file held, else the last one opened or downloaded
    * (Firefox, which holds no file), else null.
@@ -49,14 +51,21 @@ export interface StorageAdapter {
    */
   saveFile(d: AppData): Promise<string>;
   /**
+   * Lets the user pick a file, whether a file is held or not, writes the data to it, and from then
+   * on `fileName` and `autoSave` are for the new file. The file held before stays as it was, with
+   * the data of its last write. The picker suggests the name of the file held. Where the browser
+   * cannot write to a file (Firefox), downloads one, as `saveFile` does.
+   *
+   * Rejects with an `AbortError` when the user cancels the picker, and with the browser's error
+   * when the picker or the write fails. Either way nothing changes: the file held stays held.
+   */
+  saveFileAs(d: AppData): Promise<string>;
+  /**
    * Writes to the file held without asking. Rejects when no file can be written to by itself; on a
    * failed write it rejects with the error and `canAutoSave` turns false, until a `saveFile`.
    */
   autoSave(d: AppData): Promise<void>;
 }
-
-/** The localStorage key of the cache. */
-const CACHE_KEY = 'shift-scheduler/v1';
 
 /** The name suggested for the save file, and the name of the download. */
 const FILE_NAME = 'plan-smen.json';
@@ -165,10 +174,10 @@ function download(text: string): void {
 }
 
 /**
- * The adapter for the real page. Data lives in `localStorage` as a cache. The save file is read
- * and written through File System Access where the browser has it (Edge, Chrome), with the handle
- * kept in memory only. Elsewhere (Firefox) a file is opened through a file input and saved by
- * download, and `canAutoSave` is never true.
+ * The adapter for the real page. The save file is read and written through File System Access
+ * where the browser has it (Edge, Chrome), with the handle kept in memory only. Elsewhere (Firefox)
+ * a file is opened through a file input and saved by download, and `canAutoSave` is never true.
+ * Nothing is kept in the browser: `startData` is always null.
  */
 export function browserStorage(): StorageAdapter {
   // The file saved to, and whether it may be written to without asking. `writable` is changed in
@@ -179,26 +188,27 @@ export function browserStorage(): StorageAdapter {
   // The last file opened or downloaded, for where there is no handle: no File System Access.
   let lastName: string | null = null;
 
-  return {
-    loadCache() {
-      try {
-        const text = localStorage.getItem(CACHE_KEY);
-        return text === null ? null : parseSaveFile(text);
-      } catch {
-        // Storage is off, or the value is no good (a SaveFileError): carry on without a cache.
-        // The stored value stays as it is.
-        return null;
-      }
-    },
+  /**
+   * Lets the user pick a file to save to, writes `text` to it and holds it from then on; or, where
+   * the browser has no save picker, downloads the text. The file held before stays held until the
+   * write to the new one has succeeded. Resolves with the name of the file.
+   */
+  const saveToNewFile = async (text: string, suggestedName: string): Promise<string> => {
+    const w = pickers();
+    if (typeof w.showSaveFilePicker === 'function') {
+      // A cancel rejects with the browser's AbortError: nothing was saved.
+      const handle = await w.showSaveFilePicker({ suggestedName, types: FILE_TYPES });
+      await writeTo(handle, text);
+      held = { handle, writable: true };
+      return handle.name;
+    }
+    download(text);
+    lastName = FILE_NAME;
+    return FILE_NAME;
+  };
 
-    saveCache(d) {
-      try {
-        localStorage.setItem(CACHE_KEY, serialize(d));
-      } catch {
-        // Ignored on purpose: a full or disabled storage must not get in the way of the work. The
-        // save file is the real store, and the cache is optional.
-      }
-    },
+  return {
+    startData: () => null,
 
     fileName: () => held?.handle.name ?? lastName,
 
@@ -250,19 +260,11 @@ export function browserStorage(): StorageAdapter {
         // while the question was open is not this one, and stays.
         if (held === target) held = null;
       }
+      return saveToNewFile(text, FILE_NAME);
+    },
 
-      const w = pickers();
-      if (typeof w.showSaveFilePicker === 'function') {
-        // A cancel rejects with the browser's AbortError: nothing was saved.
-        const handle = await w.showSaveFilePicker({ suggestedName: FILE_NAME, types: FILE_TYPES });
-        await writeTo(handle, text);
-        held = { handle, writable: true };
-        return handle.name;
-      }
-
-      download(text);
-      lastName = FILE_NAME;
-      return FILE_NAME;
+    async saveFileAs(d) {
+      return saveToNewFile(serialize(d), held?.handle.name ?? FILE_NAME);
     },
 
     async autoSave(d) {
@@ -279,24 +281,25 @@ export function browserStorage(): StorageAdapter {
   };
 }
 
+/** The name of the file that `memoryStorage().saveFileAs` saves to. */
+export const SAVED_AS_NAME = 'plan-smen-kopie.json';
+
 /**
- * An adapter for tests: it keeps the cache in memory, opens nothing, cannot auto-save, and
- * collects the text of every save in `saved`.
+ * An adapter for tests: the page starts with `initial` (a copy of it each time), opens nothing,
+ * cannot auto-save, and collects the text of every save in `saved`. `saveFile` saves to
+ * `plan-smen.json`, `saveFileAs` to `SAVED_AS_NAME`.
  */
 export function memoryStorage(
   initial: AppData | null = null,
 ): StorageAdapter & { saved: string[] } {
-  let cached = initial === null ? null : structuredClone(initial);
+  const start = initial === null ? null : structuredClone(initial);
   let name: string | null = null;
   const saved: string[] = [];
 
   return {
     saved,
-    // Copies both ways, like a real storage, which holds text.
-    loadCache: () => (cached === null ? null : structuredClone(cached)),
-    saveCache(d) {
-      cached = structuredClone(d);
-    },
+    // A copy every time, as a real file would be read afresh.
+    startData: () => (start === null ? null : structuredClone(start)),
     fileName: () => name,
     canAutoSave: () => false,
     openFile: async () => null,
@@ -304,6 +307,11 @@ export function memoryStorage(
       saved.push(serialize(d));
       name = FILE_NAME;
       return FILE_NAME;
+    },
+    async saveFileAs(d) {
+      saved.push(serialize(d));
+      name = SAVED_AS_NAME;
+      return SAVED_AS_NAME;
     },
     async autoSave(d) {
       saved.push(serialize(d));

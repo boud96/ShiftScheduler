@@ -53,6 +53,14 @@ Each ruling says what was decided, why, and what it costs if the decision was wr
 - R37: In a paste, a first column that holds only an `L` and words (`L dopoledne`, L morning) is still taken for names: only an `L` followed by a digit counts as a day value there. Why: the team lead writes notes with the time (R19), the paste dialog says that the first column is left out, and a broader rule (an `L` and a space) would take a name written with an initial for a day. Cost if wrong: such a paste shifts by one day, with the dialog's warning shown.
 - R38: The fix wave's extras are accepted: `isBelowFpd` is also used by the first draft (`construct.ts`) and the totals (`Grid.tsx`), and `FPD_TOLERANCE` is private; the e2e click on another cell presses the 18th cell after a hit test, since the 25th lies under the totals at 1280 × 720; R30 and the skipped repair are pinned by tests behind a call-through `vi.mock('./repair')` in `search.test.ts`. Why: each follows the brief's intent and is tested. Cost if wrong: two hunks to revert.
 
+## After Phase 1.1: version 1.1.1
+
+The user's decisions of 9 Nov 2026, after trying 1.1.0. A save into a new file, meant as a backup, made the page go on saving into that new file.
+
+- The save bar has three buttons: `Uložit` (Save), `Uložit jako…` (Save as…) and `Otevřít soubor` (Open file). `Uložit jako…` works as in other programs: the page goes on saving into the new file, and the file before stays as it was. The user chose this over a "save a copy" that would keep saving into the old file.
+- The page always opens at the start screen, `Otevřít soubor` or `Začít nový`. The browser keeps no copy of the plan anymore, so nothing is restored after a reload, and the user declined a "restore unsaved changes" choice. The warning before closing a page with changes that are not in a file stays. What an older version left in the browser's storage is neither read nor removed.
+- GitHub Actions builds and tests every push, and a version tag publishes a release with the built file (`.github/workflows/build.yml`).
+
 ## Open items
 
 The parked minors that the final fix wave did not take, one line each with its file. The wave fixed the rest.
@@ -82,6 +90,7 @@ The parked minors that the final fix wave did not take, one line each with its f
 - `src/clipboard/tsv.ts` (`hasNamesColumn`): a first column that holds only an `L` and words (`L dopoledne`, L morning) is still taken for names, since only an `L` followed by a digit counts as a day value (R37). The dialog says so (`První sloupec vypadá jako jména, vynechá se.`). No test pins this case.
 - `src/ui/month/CellMenu.tsx`: since the fix wave, a right press on the open form's own cell no longer counts as a press on its anchor, so in a real browser it closes the form, as intended. No test pins it: jsdom does not move the focus on a press, and no e2e spec right-clicks.
 - `src/generator/repair.ts`: the stop is asked before each trade, not inside the sets and chains that follow one, so a capped repair can run one such pass past its 200 ms (R27, R29, R30 as designed).
+- `src/generator/search.test.ts` ("with a time budget, cools every segment in its share of the time"): it failed once in a full run of the unit tests on 9 Nov 2026, and passed alone three times and in the next full run. It measures 300 ms segments with the wall clock, so a busy machine can starve a segment; it may need a looser check or a larger budget.
 
 ## Questions for the team lead
 

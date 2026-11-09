@@ -44,7 +44,9 @@ The end-to-end specs are in `tests/e2e`:
 1. Run `npm ci` and `npm run build`.
 2. Send `dist/index.html`. That one file is the whole tool.
 3. The user opens it from disk in current Edge or Chrome. Saving to the file, with auto-save, works there.
-4. Firefox works too, but cannot write to a file by itself: `Uložit do souboru` (Save to file) downloads a copy each time.
+4. Firefox works too, but cannot write to a file by itself: `Uložit` (Save) and `Uložit jako…` (Save as…) download a copy each time.
+
+GitHub builds it too: `.github/workflows/build.yml` runs the typecheck, the unit tests and the browser tests on every push, and keeps the built file as a download of the run. A version tag such as `v1.1.1` also publishes a GitHub Release with the file attached as `planovani-smen-1.1.1.html`, with notes in Czech on how to open it. On GitHub's slower machines each unit test gets 60 s and a browser spec one retry.
 
 Before you hand a build out, go through [Manual checks before handing out a build](#manual-checks-before-handing-out-a-build).
 
@@ -52,16 +54,17 @@ Before you hand a build out, go through [Manual checks before handing out a buil
 
 **The save file is the real data.** It is one JSON file that holds everything: the team with its names, preferences and limits per person, the settings, the requests, the doctor's notes, the months and the starting counts. The default name is `plan-smen.json`. Keep it with your other work files, in a folder that is backed up. Files saved by Phase 1 (version 1) still open, and a save writes version 2, which a Phase 1 build refuses (`Soubor je z novější verze aplikace.`, The file is from a newer version of the app).
 
-**Browser storage only caches it.** The page also keeps every change in the browser's storage, so that a reload loses nothing. A browser may clear that storage (a managed browser may do so each time it closes), and a new copy of the HTML file may count as a new site with an empty cache. Then the page shows its start screen, and you open the save file with `Otevřít soubor` (Open file).
+**Nothing is kept in the browser.** The page always opens at its start screen: `Otevřít soubor` (Open file) or `Začít nový` (Start new). Phase 1.1 and older kept a copy of the plan in the browser and opened it by themselves; this version neither reads nor writes that copy, and leaves alone what an older version left there.
 
-- In Edge and Chrome, once you have opened a file or saved to one, every change is written to it by itself, about a second after the change. The bar at the top says so: `Ukládá se automaticky do …` (Saving automatically to …). The page forgets which file it was saving to when it is reloaded, so auto-save is off in every new session until you pick the file again, in one of two ways:
-  - `Uložit do souboru` (Save to file) writes what the page shows to the file you pick, and from then on resumes auto-saving to it. Use it after a reload to carry on with the plan on the page.
-  - `Otevřít soubor` (Open file) replaces the page's data with the file's, and auto-saves to that file from then on. Use it to go back to what the file holds. Changes on the page that are not in a file are lost, so the page asks first (`Neuložené změny`, Unsaved changes).
-- The browser asks you to confirm before the page is closed or reloaded while it holds changes made in this session that are not in a file. A page that was only reloaded and not changed since does not ask, although the bar says that its data is not saved to a file: it holds what it held before the reload.
-- In Firefox, `Uložit do souboru` downloads the file, and `Otevřít soubor` opens it through a file chooser. The bar says `Změny nejsou uložené do souboru` (Changes are not saved to the file) until you save.
-- Clearing the browser's data loses the changes made since the last save to the file.
+- In Edge and Chrome, once you have opened a file or saved to one, every change is written to it by itself, about a second after the change. The bar at the top says so: `Ukládá se automaticky do …` (Saving automatically to …).
+- The bar has three buttons:
+  - `Uložit` (Save) writes the plan into the file in use at once. A new plan, which has no file yet, asks for a name first.
+  - `Uložit jako…` (Save as…) asks for a name, writes the plan there, and from then on saves into the new file. The file before stays as it was at that moment. That is how to keep a backup: save as a new name, and the old file is the backup; or save the backup as a new name, then open the main file again with `Otevřít soubor`.
+  - `Otevřít soubor` (Open file) replaces the page's plan with the file's, and saves into that file from then on. Changes on the page that are not in a file are lost, so the page asks first (`Neuložené změny`, Unsaved changes).
+- The browser asks you to confirm before the page is closed or reloaded while it holds changes that are not in a file. Changes that are not in a file are gone once the page is closed: the next start opens the file.
+- In Firefox, `Uložit` and `Uložit jako…` download the file, and `Otevřít soubor` opens it through a file chooser. The bar says `Změny nejsou uložené do souboru` (Changes are not saved to the file) until you save.
 
-**No team data is in this repository.** Names, preferences and requests exist only in the user's save file and browser cache. Tests and examples use a made-up team of eight people, A to H, in `src/test/team.ts`. Never commit a save file, a screenshot of a real plan or a real name. `.gitignore` helps: it ignores `plan-smen*.json` anywhere, and every JSON file at the root except `package.json`, `package-lock.json` and `tsconfig.json`, so a new JSON file of the project at the root needs an exception line there.
+**No team data is in this repository.** Names, preferences and requests exist only in the user's save file. Tests and examples use a made-up team of eight people, A to H, in `src/test/team.ts`. Never commit a save file, a screenshot of a real plan or a real name. `.gitignore` helps: it ignores `plan-smen*.json` anywhere, and every JSON file at the root except `package.json`, `package-lock.json` and `tsconfig.json`, so a new JSON file of the project at the root needs an exception line there.
 
 ## Manual checks before handing out a build
 
@@ -71,16 +74,18 @@ The automated tests cannot cover other browsers, the operating system's dialogs 
 
 - The page opens from disk.
 - Generating works in its blob worker: `Vygenerovat` (Generate) runs and ends with `Hotovo` (Done).
-- Opening and saving work through the download fallback: `Uložit do souboru` downloads `plan-smen.json`, and `Otevřít soubor` loads it again.
+- Opening and saving work through the download fallback: `Uložit` and `Uložit jako…` download `plan-smen.json`, and `Otevřít soubor` loads it again.
 - Cancelling the file picker of `Otevřít soubor` changes nothing. This relies on the file input's `cancel` event.
 - Copying a row works: the `📋` button in a person's name cell, then paste into Excel.
 
 **Edge and Chrome, in a normal (headed) window**
 
 - Copying a row works through the Clipboard API.
-- Saving to a file and auto-save work: `Uložit do souboru` writes the file you picked, and later changes reach it by themselves.
+- Saving to a file and auto-save work: `Uložit` writes the file you picked, and later changes reach it by themselves.
+- `Uložit jako…` asks for a name even with a file in use, writes the new file, and later changes reach the new file only: the old one keeps what it had.
+- After a reload, the page shows its start screen, not the plan.
 - That includes `requestPermission` after a slow file pick. Open a file and take more than 5 s in the picker, so that the click is no longer fresh when the page asks for write access. Check that the page can still write to the file, or says plainly that it cannot.
-- A file that refuses write access, or cannot be written to, is given up: move or delete the file you are saving to, or refuse the question about write access, and press `Uložit do souboru` (Save to file). The page opens the save picker in its place, and if you cancel it, the next press opens the picker at once. Answering the question very slowly may make the browser refuse the picker: the message `Soubor se nepodařilo uložit.` (The file could not be saved.) shows, and the next press works.
+- A file that refuses write access, or cannot be written to, is given up: move or delete the file you are saving to, or refuse the question about write access, and press `Uložit` (Save). The page opens the save picker in its place, and if you cancel it, the next press opens the picker at once. Answering the question very slowly may make the browser refuse the picker: the message `Soubor se nepodařilo uložit.` (The file could not be saved.) shows, and the next press works.
 
 **Doctor's form with a real keyboard, Edge and Firefox**
 

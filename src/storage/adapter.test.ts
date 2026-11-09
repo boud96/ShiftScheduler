@@ -1,12 +1,13 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { browserStorage, memoryStorage } from './adapter';
+import { SAVED_AS_NAME, browserStorage, memoryStorage } from './adapter';
 import type { StorageAdapter } from './adapter';
 import { SaveFileError, parseSaveFile, serialize } from './saveFile';
-import { newAppData, newPerson } from '../domain/defaults';
+import { newAppData } from '../domain/defaults';
 import type { AppData } from '../domain/types';
 
-const CACHE_KEY = 'shift-scheduler/v1';
+/** Where Phase 1.1 and older kept a copy of the plan in the browser. */
+const OLD_CACHE_KEY = 'shift-scheduler/v1';
 const FILE_NAME = 'plan-smen.json';
 
 /** Things to undo after a test: event listeners and the like. */
@@ -33,20 +34,6 @@ const abortError = () => new DOMException('The user aborted a request.', 'AbortE
 // --- The brief's tests ---------------------------------------------------------------------
 
 describe('storage adapters (brief)', () => {
-  it('browserStorage() round-trips through localStorage', () => {
-    const s = browserStorage();
-    const d = newAppData();
-    s.saveCache(d);
-    expect(localStorage.getItem(CACHE_KEY)).not.toBeNull();
-    expect(s.loadCache()).toEqual(d);
-  });
-
-  it('a corrupt cache value gives null from loadCache() and stays in place', () => {
-    localStorage.setItem(CACHE_KEY, '{"app":"shift-scheduler","schemaVersion":1,');
-    expect(browserStorage().loadCache()).toBeNull();
-    expect(localStorage.getItem(CACHE_KEY)).toBe('{"app":"shift-scheduler","schemaVersion":1,');
-  });
-
   it('memoryStorage().saveFile(d) records the serialized text', async () => {
     const s = memoryStorage();
     const d = newAppData();
@@ -133,82 +120,27 @@ function openThrough(
   return s.openFile();
 }
 
-// --- browserStorage: the cache -------------------------------------------------------------
+// --- browserStorage: nothing kept in the browser --------------------------------------------
 
-describe('browserStorage: the cache', () => {
-  it('keeps the data as the text of a save file under shift-scheduler/v1', () => {
-    const d = plan(1);
-    browserStorage().saveCache(d);
-    expect(parseSaveFile(localStorage.getItem(CACHE_KEY) as string)).toEqual(d);
+describe('browserStorage: nothing kept in the browser', () => {
+  it('starts with no plan, also when an older version left one in localStorage', () => {
+    expect(browserStorage().startData()).toBeNull();
+    localStorage.setItem(OLD_CACHE_KEY, serialize(plan(1)));
+    expect(browserStorage().startData()).toBeNull();
   });
 
-  it('gives back the last data cached, also to a new adapter', () => {
+  it('writes nothing to localStorage, and leaves alone what an older version left there', async () => {
+    const left = serialize(plan(1));
+    localStorage.setItem(OLD_CACHE_KEY, left);
+    const { open, save } = stubPickers();
     const s = browserStorage();
-    s.saveCache(plan(1));
-    s.saveCache(plan(2));
-    expect(s.loadCache()).toEqual(plan(2));
-    expect(browserStorage().loadCache()).toEqual(plan(2));
-  });
-
-  it('returns null when nothing is cached', () => {
-    expect(browserStorage().loadCache()).toBeNull();
-  });
-
-  it.each([
-    ['broken JSON', '{'],
-    ['an empty string', ''],
-    ['JSON that is not a plan', '[]'],
-    ['another app', '{"app":"other"}'],
-    ['a newer version', '{"app":"shift-scheduler","schemaVersion":3}'],
-    ['a damaged plan', '{"app":"shift-scheduler","schemaVersion":1,"people":[]}'],
-  ])('returns null for %s and leaves the stored value alone', (_what, stored) => {
-    localStorage.setItem(CACHE_KEY, stored);
-    expect(browserStorage().loadCache()).toBeNull();
-    expect(localStorage.getItem(CACHE_KEY)).toBe(stored);
-  });
-
-  it('completes a person that has only an id and a name, so that a reload can draw the page', () => {
-    // Once such a person came back as it was, without prefs, and every reload drew a blank page.
-    const damaged = {
-      app: 'shift-scheduler',
-      schemaVersion: 1,
-      people: [{ id: 'p1', name: 'Operátor 1' }],
-      settings: {},
-      cells: {},
-      months: {},
-    };
-    const text = JSON.stringify(damaged);
-    localStorage.setItem(CACHE_KEY, text);
-    const loaded = browserStorage().loadCache();
-    expect(loaded?.people).toEqual([newPerson('p1', 'Operátor 1')]);
-    expect(loaded?.people[0].prefs.ratings).toEqual({});
-    expect(localStorage.getItem(CACHE_KEY)).toBe(text); // the stored value is left alone
-  });
-
-  it('returns null when localStorage cannot be read', () => {
-    vi.spyOn(Storage.prototype, 'getItem').mockImplementation(() => {
-      throw new DOMException('Access is denied.', 'SecurityError');
-    });
-    expect(browserStorage().loadCache()).toBeNull();
-  });
-
-  it('ignores a cache write that fails, and keeps what was cached before', () => {
-    const s = browserStorage();
-    s.saveCache(plan(1));
-    const setItem = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => {
-      throw new DOMException('The quota has been exceeded.', 'QuotaExceededError');
-    });
-    expect(() => s.saveCache(plan(2))).not.toThrow();
-    expect(setItem).toHaveBeenCalledTimes(1);
-    setItem.mockRestore();
-    expect(s.loadCache()).toEqual(plan(1));
-  });
-
-  it('ignores a cache write that the browser refuses', () => {
-    vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => {
-      throw new DOMException('Access is denied.', 'SecurityError');
-    });
-    expect(() => browserStorage().saveCache(plan(1))).not.toThrow();
+    await openThrough(s, open, fileOf('a.json', plan(2)));
+    await s.autoSave(plan(3));
+    await s.saveFile(plan(4));
+    save.mockResolvedValueOnce(fakeHandle('b.json').handle);
+    await s.saveFileAs(plan(5));
+    expect(localStorage.length).toBe(1);
+    expect(localStorage.getItem(OLD_CACHE_KEY)).toBe(left);
   });
 
   it('has no file and cannot auto-save before one is opened or saved', () => {
@@ -642,6 +574,70 @@ describe('browserStorage with File System Access: saveFile', () => {
   });
 });
 
+describe('browserStorage with File System Access: saveFileAs', () => {
+  it('shows the save picker though a file is held, and from then on holds the new file', async () => {
+    const { open, save } = stubPickers();
+    const a = fileOf('a.json', plan(1));
+    const b = fakeHandle('b.json');
+    const s = browserStorage();
+    await openThrough(s, open, a);
+    save.mockResolvedValueOnce(b.handle);
+
+    expect(await s.saveFileAs(plan(2))).toBe('b.json');
+    expect(save).toHaveBeenCalledTimes(1);
+    expect(save).toHaveBeenCalledWith(expect.objectContaining({ suggestedName: 'a.json' }));
+    expect(b.state.writes).toEqual([serialize(plan(2))]);
+    expect(s.fileName()).toBe('b.json');
+    expect(s.canAutoSave()).toBe(true);
+
+    // The changes go to the new file; the old one keeps what it had.
+    await s.autoSave(plan(3));
+    await s.saveFile(plan(4));
+    expect(b.state.writes).toEqual([serialize(plan(2)), serialize(plan(3)), serialize(plan(4))]);
+    expect(a.state.writes).toEqual([]);
+    expect(parseSaveFile(a.state.content)).toEqual(plan(1));
+  });
+
+  it('suggests plan-smen.json when no file is held', async () => {
+    const { save } = stubPickers();
+    save.mockResolvedValueOnce(fakeHandle('vybrany.json').handle);
+    const s = browserStorage();
+    expect(await s.saveFileAs(plan(1))).toBe('vybrany.json');
+    expect(save).toHaveBeenCalledWith(expect.objectContaining({ suggestedName: FILE_NAME }));
+    expect(s.fileName()).toBe('vybrany.json');
+  });
+
+  it('rejects with the AbortError of a cancelled picker and keeps saving to the file held', async () => {
+    const { open, save } = stubPickers();
+    const a = fileOf('a.json', plan(1));
+    const s = browserStorage();
+    await openThrough(s, open, a);
+    const cancelled = abortError();
+    save.mockRejectedValueOnce(cancelled);
+
+    await expect(s.saveFileAs(plan(2))).rejects.toBe(cancelled);
+    expect(s.fileName()).toBe('a.json');
+    expect(s.canAutoSave()).toBe(true);
+    await s.autoSave(plan(3));
+    expect(a.state.writes).toEqual([serialize(plan(3))]);
+  });
+
+  it('keeps the file held when the write to the new file fails', async () => {
+    const { open, save } = stubPickers();
+    const a = fileOf('a.json', plan(1));
+    const b = fakeHandle('b.json');
+    b.state.writeError = new DOMException('Disk full.', 'QuotaExceededError');
+    const s = browserStorage();
+    await openThrough(s, open, a);
+    save.mockResolvedValueOnce(b.handle);
+
+    await expect(s.saveFileAs(plan(2))).rejects.toBe(b.state.writeError);
+    expect(b.state.writers[0].abort).toHaveBeenCalledTimes(1);
+    expect(s.fileName()).toBe('a.json');
+    expect(s.canAutoSave()).toBe(true);
+  });
+});
+
 describe('browserStorage with File System Access: autoSave and canAutoSave', () => {
   it('writes the data to the held file', async () => {
     const { open } = stubPickers();
@@ -813,6 +809,17 @@ describe('browserStorage without File System Access', () => {
     expect(s.canAutoSave()).toBe(false);
   });
 
+  it('downloads plan-smen.json for saveFileAs too, as there is no file to pick', async () => {
+    vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:plan-smen');
+    vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => undefined);
+    const clicks = captureLinkClicks();
+    const s = browserStorage();
+    expect(await s.saveFileAs(plan(1))).toBe(FILE_NAME);
+    expect(clicks).toEqual([{ href: 'blob:plan-smen', download: FILE_NAME, attached: true }]);
+    expect(s.fileName()).toBe(FILE_NAME);
+    expect(s.canAutoSave()).toBe(false);
+  });
+
   it('never auto-saves', async () => {
     vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:x');
     vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => undefined);
@@ -828,28 +835,20 @@ describe('browserStorage without File System Access', () => {
 
 describe('memoryStorage', () => {
   it('starts with the initial data, or nothing', () => {
-    expect(memoryStorage().loadCache()).toBeNull();
-    expect(memoryStorage(null).loadCache()).toBeNull();
-    expect(memoryStorage(plan(1)).loadCache()).toEqual(plan(1));
+    expect(memoryStorage().startData()).toBeNull();
+    expect(memoryStorage(null).startData()).toBeNull();
+    expect(memoryStorage(plan(1)).startData()).toEqual(plan(1));
   });
 
-  it('returns a copy of the cached data every time', () => {
+  it('returns a copy of the initial data every time', () => {
     const initial = plan(1);
     const s = memoryStorage(initial);
-    const first = s.loadCache() as AppData;
+    const first = s.startData() as AppData;
     expect(first).not.toBe(initial);
     first.people[0].name = 'Changed';
     initial.people[1].name = 'Changed too';
-    expect(s.loadCache()).toEqual(plan(1));
-    expect(s.loadCache()).not.toBe(s.loadCache());
-  });
-
-  it('gives back the last data cached, as a copy', () => {
-    const s = memoryStorage(plan(1));
-    const next = plan(2);
-    s.saveCache(next);
-    next.people[0].name = 'Changed after saving';
-    expect(s.loadCache()).toEqual(plan(2));
+    expect(s.startData()).toEqual(plan(1));
+    expect(s.startData()).not.toBe(s.startData());
   });
 
   it('cannot auto-save, has no file yet, and opens nothing', async () => {
@@ -870,13 +869,21 @@ describe('memoryStorage', () => {
     expect(s.canAutoSave()).toBe(false);
   });
 
+  it('saveFileAs pushes the serialized text and switches to its own name', async () => {
+    const s = memoryStorage();
+    await s.saveFile(plan(1));
+    expect(await s.saveFileAs(plan(2))).toBe(SAVED_AS_NAME);
+    expect(s.fileName()).toBe(SAVED_AS_NAME);
+    expect(s.saved).toEqual([serialize(plan(1)), serialize(plan(2))]);
+  });
+
   it('is made of plain properties: a replaced method is used, a detached one works', async () => {
     const s = memoryStorage(plan(1));
     s.openFile = async () => { throw new SaveFileError('Soubor je poškozený.'); };
     await expect(s.openFile()).rejects.toThrow('Soubor je poškozený.');
 
-    const { loadCache, saveFile, saved } = memoryStorage(plan(2));
-    expect(loadCache()).toEqual(plan(2));
+    const { startData, saveFile, saved } = memoryStorage(plan(2));
+    expect(startData()).toEqual(plan(2));
     await saveFile(plan(2));
     expect(saved).toEqual([serialize(plan(2))]);
   });

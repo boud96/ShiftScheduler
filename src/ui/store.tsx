@@ -9,8 +9,7 @@ import { reduce } from './reducer';
 import type { Action } from './reducer';
 import { FILE_ERRORS } from './text';
 
-/** How long a change waits for the next one before it goes to the cache, and to the file. */
-const CACHE_DELAY_MS = 300;
+/** How long a change waits for the next one before it goes to the file. */
 const FILE_DELAY_MS = 1000;
 
 type Timer = ReturnType<typeof setTimeout>;
@@ -21,8 +20,8 @@ export interface FileStatus {
   /** When the data was last saved to the file, or opened from it, as an ISO time. */
   savedAt: string | null;
   /**
-   * True when the file may lack changes. It is true for data that came from the cache or a new
-   * plan, since nothing says that a file holds them. It is not true while changes are written to
+   * True when the file may lack changes. It is true for a new plan, and for data the page started
+   * with, since nothing says that a file holds them. It is not true while changes are written to
    * the file by themselves.
    */
   dirty: boolean;
@@ -50,6 +49,11 @@ export interface AppStore {
   openFile(): Promise<void>;
   /** Saves to the file, or downloads it where the browser cannot write to one. Never rejects. */
   saveFile(): Promise<void>;
+  /**
+   * Lets the user pick a file, saves to it and keeps saving there; the file before stays as it
+   * was. Downloads where the browser cannot write to a file. Never rejects.
+   */
+  saveFileAs(): Promise<void>;
   /** Starts a new plan with placeholder people. */
   newData(): void;
   /** What went wrong with the last open or save, in Czech, or null. */
@@ -84,19 +88,19 @@ interface AppProviderProps {
 }
 
 /**
- * Holds the plan and where it is saved. The save file is the real store: every change goes to the
- * cache after 300 ms, and where the file can be written to without asking, to the file after 1 s.
- * Elsewhere the changes are marked as not in the file. At most one write to the file runs at a
- * time; a change that comes in during one is written after it, with the latest data.
+ * Holds the plan and where it is saved. The save file is the only store: where the file can be
+ * written to without asking, every change goes to it after 1 s. Elsewhere the changes are marked
+ * as not in the file. At most one write to the file runs at a time; a change that comes in during
+ * one is written after it, with the latest data.
  *
  * A page that holds changes made since it was opened (or since the data last matched a file) that
- * no file has yet asks the browser to confirm before it is closed or reloaded. Data that came from
- * the cache is marked as not in a file too, but it is no change of this session: that alone does
- * not ask.
+ * no file has yet asks the browser to confirm before it is closed or reloaded. Data the page
+ * started with (`storage.startData`, which only tests hand in) is marked as not in a file too, but
+ * it is no change of this session: that alone does not ask.
  */
 export function AppProvider({ storage, runner, children }: AppProviderProps) {
   const [initial] = useState(() => {
-    const data = storage.loadCache();
+    const data = storage.startData();
     const file: FileStatus = {
       name: storage.fileName(),
       savedAt: null,
@@ -116,7 +120,7 @@ export function AppProvider({ storage, runner, children }: AppProviderProps) {
   const replacements = useRef(0);
   /** Whether changes made in this session are not in a file: what leaving the page would lose. */
   const unsaved = useRef(false);
-  const timers = useRef<{ cache?: Timer; file?: Timer }>({});
+  const timers = useRef<{ file?: Timer }>({});
   const writes = useRef({
     /** Ends when every write so far has. */
     last: Promise.resolve() as Promise<unknown>,
@@ -130,18 +134,6 @@ export function AppProvider({ storage, runner, children }: AppProviderProps) {
     /** Reads what the storage knows now: the name of the file, and whether it saves by itself. */
     const syncFile = (patch: Partial<FileStatus> = {}) =>
       setFile((f) => ({ ...f, name: storage.fileName(), auto: storage.canAutoSave(), ...patch }));
-
-    const flushCache = () => {
-      if (timers.current.cache === undefined) return;
-      clearTimeout(timers.current.cache);
-      timers.current.cache = undefined;
-      if (latest.current !== null) storage.saveCache(latest.current);
-    };
-
-    const scheduleCache = () => {
-      clearTimeout(timers.current.cache);
-      timers.current.cache = setTimeout(flushCache, CACHE_DELAY_MS);
-    };
 
     /** Runs the write once every earlier one has ended, so that no two overlap. */
     const inTurn = <T,>(write: () => Promise<T>): Promise<T> => {
@@ -181,7 +173,6 @@ export function AppProvider({ storage, runner, children }: AppProviderProps) {
     /** The data changed, other than by opening a file. */
     const changed = () => {
       unsaved.current = true;
-      scheduleCache();
       if (storage.canAutoSave()) scheduleAutoSave();
       else setFile((f) => (f.dirty && !f.auto ? f : { ...f, dirty: true, auto: false }));
     };
@@ -231,7 +222,6 @@ export function AppProvider({ storage, runner, children }: AppProviderProps) {
       unsaved.current = false; // the page matches the file it was read from
       setData(opened);
       replaced();
-      scheduleCache();
       setFile({
         name: storage.fileName(),
         savedAt: new Date().toISOString(),
@@ -241,13 +231,18 @@ export function AppProvider({ storage, runner, children }: AppProviderProps) {
       setError(null);
     };
 
-    const saveFile = async () => {
+    /**
+     * Saves through `write`, the adapter's `saveFile` or `saveFileAs`, in turn with the other
+     * writes, and shows where the data went. Either may switch the adapter to another file, which
+     * the status then names, and which takes the changes from then on.
+     */
+    const saveWith = async (write: (d: AppData) => Promise<string>) => {
       if (latest.current === null) return;
       let saved: AppData;
       try {
         saved = await inTurn(async () => {
           const current = latest.current as AppData; // the latest when this write begins
-          await storage.saveFile(current);
+          await write(current);
           return current;
         });
       } catch (e) {
@@ -268,6 +263,9 @@ export function AppProvider({ storage, runner, children }: AppProviderProps) {
       if (behind && auto) scheduleAutoSave(); // the file can take it now
     };
 
+    const saveFile = () => saveWith((d) => storage.saveFile(d));
+    const saveFileAs = () => saveWith((d) => storage.saveFileAs(d));
+
     const newData = () => {
       setError(null);
       dispatch({ type: 'load', data: newAppData() });
@@ -275,18 +273,14 @@ export function AppProvider({ storage, runner, children }: AppProviderProps) {
 
     const dismissError = () => setError(null);
 
-    return { dispatch, openFile, saveFile, newData, dismissError, flushCache };
+    return { dispatch, openFile, saveFile, saveFileAs, newData, dismissError };
   }, [storage]);
 
-  // A page that goes away cannot wait for the timers: its last change goes to the cache now.
+  // A write that is still due when the provider goes away has no page to report to.
   useEffect(() => {
-    window.addEventListener('pagehide', actions.flushCache);
-    return () => {
-      window.removeEventListener('pagehide', actions.flushCache);
-      actions.flushCache();
-      clearTimeout(timers.current.file);
-    };
-  }, [actions]);
+    const pending = timers.current;
+    return () => clearTimeout(pending.file);
+  }, []);
 
   // Closing or reloading the page with changes that are not in a file loses them from the file's
   // point of view: the browser is asked to confirm. It shows a text of its own; the empty
@@ -309,6 +303,7 @@ export function AppProvider({ storage, runner, children }: AppProviderProps) {
       file,
       openFile: actions.openFile,
       saveFile: actions.saveFile,
+      saveFileAs: actions.saveFileAs,
       newData: actions.newData,
       error,
       dismissError: actions.dismissError,

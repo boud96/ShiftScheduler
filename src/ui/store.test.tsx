@@ -4,7 +4,7 @@ import { StrictMode } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { newAppData } from '../domain/defaults';
 import type { AppData } from '../domain/types';
-import { memoryStorage } from '../storage/adapter';
+import { SAVED_AS_NAME, memoryStorage } from '../storage/adapter';
 import type { StorageAdapter } from '../storage/adapter';
 import { SaveFileError, serialize } from '../storage/saveFile';
 import { inProcessRunner } from '../worker/runner';
@@ -95,15 +95,15 @@ async function mountWithOpenFile() {
 }
 
 describe('the start of the store', () => {
-  it('starts with the cached data, which may not be in any file', () => {
-    const cached = otherPlan();
-    mount(memoryStorage(cached));
-    expect(app.data).toEqual(cached);
+  it('starts with the data the storage hands in, which may not be in any file', () => {
+    const start = otherPlan();
+    mount(memoryStorage(start));
+    expect(app.data).toEqual(start);
     expect(app.file).toEqual({ name: null, savedAt: null, dirty: true, auto: false });
     expect(app.error).toBeNull();
   });
 
-  it('starts without data when the cache is empty', () => {
+  it('starts without data when the storage hands in none, as the real page always does', () => {
     mount(memoryStorage(null));
     expect(app.data).toBeNull();
     expect(app.file.dirty).toBe(false);
@@ -158,88 +158,11 @@ describe('changing the data', () => {
   });
 
   it('does not count an action that changes nothing as a change', async () => {
-    const storage = memoryStorage(null);
-    storage.openFile = async () => newAppData();
-    const saveCache = vi.spyOn(storage, 'saveCache');
-    mount(storage);
-    await act(() => app.openFile());
-    await advance(300);
-    expect(saveCache).toHaveBeenCalledTimes(1); // the opened data
-
+    const { autoSave } = await mountWithOpenFile();
     act(() => app.dispatch({ type: 'togglePin', date: '2027-01-04', personId: 'p1' }));
     await advance(5000);
     expect(app.file.dirty).toBe(false);
-    expect(saveCache).toHaveBeenCalledTimes(1);
-  });
-});
-
-describe('the cache', () => {
-  it('is written 300 ms after the last change, once, with the latest data', async () => {
-    const storage = memoryStorage(newAppData());
-    const saveCache = vi.spyOn(storage, 'saveCache');
-    mount(storage);
-
-    await setRest(11);
-    await advance(299);
-    expect(saveCache).not.toHaveBeenCalled();
-    await setRest(10);
-    await advance(299);
-    expect(saveCache).not.toHaveBeenCalled();
-    await advance(1);
-    expect(saveCache).toHaveBeenCalledTimes(1);
-    expect(saveCache.mock.calls[0][0].settings.minRestHours).toBe(10);
-    expect(storage.loadCache()?.settings.minRestHours).toBe(10);
-  });
-
-  it('is left alone when nothing has changed', async () => {
-    const storage = memoryStorage(newAppData());
-    const saveCache = vi.spyOn(storage, 'saveCache');
-    mount(storage);
-    await advance(5000);
-    expect(saveCache).not.toHaveBeenCalled();
-  });
-
-  it('is written at once when the page is hidden, and not again later', async () => {
-    const storage = memoryStorage(newAppData());
-    const saveCache = vi.spyOn(storage, 'saveCache');
-    mount(storage);
-
-    await setRest(11);
-    expect(saveCache).not.toHaveBeenCalled();
-    act(() => void window.dispatchEvent(new Event('pagehide')));
-    expect(saveCache).toHaveBeenCalledTimes(1);
-    expect(storage.loadCache()?.settings.minRestHours).toBe(11);
-    await advance(5000);
-    expect(saveCache).toHaveBeenCalledTimes(1);
-  });
-
-  it('is not written on pagehide when nothing is waiting', async () => {
-    const storage = memoryStorage(newAppData());
-    const saveCache = vi.spyOn(storage, 'saveCache');
-    mount(storage);
-    await setRest(11);
-    await advance(300);
-    act(() => void window.dispatchEvent(new Event('pagehide')));
-    expect(saveCache).toHaveBeenCalledTimes(1);
-  });
-
-  it('is written when the provider goes away with a change waiting', async () => {
-    const storage = memoryStorage(newAppData());
-    const { unmount } = mount(storage);
-    await setRest(11);
-    unmount();
-    expect(storage.loadCache()?.settings.minRestHours).toBe(11);
-  });
-
-  it('is written once per change in strict mode too', async () => {
-    const storage = memoryStorage(newAppData());
-    const saveCache = vi.spyOn(storage, 'saveCache');
-    mount(storage, true);
-    await setRest(11);
-    await advance(300);
-    expect(saveCache).toHaveBeenCalledTimes(1);
-    act(() => void window.dispatchEvent(new Event('pagehide')));
-    expect(saveCache).toHaveBeenCalledTimes(1);
+    expect(autoSave).not.toHaveBeenCalled();
   });
 });
 
@@ -553,6 +476,71 @@ describe('saving to the file', () => {
   });
 });
 
+describe('saving to a new file (Uložit jako)', () => {
+  it('writes the data to the file picked, then names it and notes the time', async () => {
+    const storage = memoryStorage(newAppData());
+    mount(storage);
+    await act(() => app.saveFile());
+    expect(app.file.name).toBe('plan-smen.json');
+
+    await setRest(11);
+    await act(() => app.saveFileAs());
+    expect(storage.saved).toHaveLength(2);
+    expect(storage.saved[1]).toBe(serialize(app.data as AppData));
+    expect(app.file).toEqual({ name: SAVED_AS_NAME, savedAt: NOW.toISOString(), dirty: false, auto: false });
+  });
+
+  it('keeps saving into the new file by itself afterwards', async () => {
+    const { storage, autoSave } = await mountWithOpenFile();
+    storage.saveFileAs = async () => {
+      storage.fileName = () => 'novy.json';
+      return 'novy.json';
+    };
+    await act(() => app.saveFileAs());
+    expect(app.file).toMatchObject({ name: 'novy.json', auto: true, dirty: false });
+
+    await setRest(11);
+    await advance(1000);
+    expect(autoSave).toHaveBeenCalledTimes(1);
+    expect(autoSave.mock.calls[0][0].settings.minRestHours).toBe(11);
+  });
+
+  it('does nothing without data', async () => {
+    const storage = memoryStorage(null);
+    const saveFileAs = vi.spyOn(storage, 'saveFileAs');
+    mount(storage);
+    await act(() => app.saveFileAs());
+    expect(saveFileAs).not.toHaveBeenCalled();
+  });
+
+  it('changes nothing when the user cancels the picker', async () => {
+    const storage = memoryStorage(newAppData());
+    mount(storage);
+    await act(() => app.saveFile());
+    storage.saveFileAs = async () => {
+      throw abortError();
+    };
+    const before = app.file;
+    await act(() => app.saveFileAs());
+    expect(app.error).toBeNull();
+    expect(app.file).toEqual(before);
+  });
+
+  it('shows an error and keeps the data and the file when the write fails', async () => {
+    const storage = memoryStorage(newAppData());
+    mount(storage);
+    await act(() => app.saveFile());
+    storage.saveFileAs = async () => {
+      throw new Error('The disk is full.');
+    };
+    const data = app.data;
+    await act(() => app.saveFileAs());
+    expect(app.error).toBe('Soubor se nepodařilo uložit.');
+    expect(app.data).toBe(data);
+    expect(app.file.name).toBe('plan-smen.json');
+  });
+});
+
 describe('opening a file', () => {
   it('replaces the data and says that the page now matches the file', async () => {
     const storage = memoryStorage(newAppData());
@@ -573,8 +561,6 @@ describe('opening a file', () => {
       dirty: false,
       auto: true,
     });
-    await advance(300);
-    expect(storage.loadCache()).toEqual(opened);
     await advance(5000);
     expect(autoSave).not.toHaveBeenCalled(); // the file has these data already
   });
@@ -662,7 +648,7 @@ describe('the error', () => {
 });
 
 describe('loads, the count of times the data was replaced', () => {
-  it('starts at 0, with cached data and without', () => {
+  it('starts at 0, with start data and without', () => {
     mount(memoryStorage(newAppData()));
     expect(app.loads).toBe(0);
     mount(memoryStorage(null));
@@ -718,9 +704,10 @@ describe('loads, the count of times the data was replaced', () => {
     expect(app.loads).toBe(0);
   });
 
-  it('is not moved by saving to the file', async () => {
+  it('is not moved by saving to the file, nor by saving to a new one', async () => {
     mount(memoryStorage(newAppData()));
     await act(() => app.saveFile());
+    await act(() => app.saveFileAs());
     expect(app.loads).toBe(0);
   });
 });
@@ -786,7 +773,7 @@ describe('leaving the page', () => {
   }
   const objects = () => leave().objected;
 
-  it('lets an untouched page go: cached data counts as unsaved, but it was not changed here', () => {
+  it('lets an untouched page go: start data counts as unsaved, but it was not changed here', () => {
     mount(memoryStorage(newAppData()));
     expect(app.file.dirty).toBe(true);
     expect(leave()).toEqual({ objected: false, returnValue: undefined });
@@ -815,11 +802,18 @@ describe('leaving the page', () => {
     expect(objects()).toBe(false);
   });
 
-  it('objects while the cache has the change but no file does, and after the cache is written', async () => {
+  it('objects for as long as no file has the change', async () => {
     mount(memoryStorage(newAppData()));
     await setRest(11);
-    await advance(300); // the cache has it
+    await advance(5000);
     expect(objects()).toBe(true);
+  });
+
+  it('stops objecting once the data has been saved to a new file', async () => {
+    mount(memoryStorage(newAppData()));
+    await setRest(11);
+    await act(() => app.saveFileAs());
+    expect(objects()).toBe(false);
   });
 
   it('stops objecting once the data has been saved to a file', async () => {

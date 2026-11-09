@@ -68,9 +68,12 @@ function OpenQuestion({ onYes, onNo }: { onYes: () => void; onNo: () => void }) 
   );
 }
 
-/** Always within reach: where the data is saved, and the buttons to save it and to open a file. */
+/**
+ * Always within reach: where the data is saved, and the buttons to save it, to save it into another
+ * file, and to open a file.
+ */
 export function SaveBar() {
-  const { file, saveFile, openFile } = useApp();
+  const { file, saveFile, saveFileAs, openFile } = useApp();
   const [asking, setAsking] = useState(false);
   const opener = useRef<HTMLButtonElement>(null);
   const { state, text } = status(file);
@@ -94,6 +97,9 @@ export function SaveBar() {
       </span>
       <button type="button" className="button" onClick={() => void saveFile()}>
         {SAVE_BAR.save}
+      </button>
+      <button type="button" className="button" onClick={() => void saveFileAs()}>
+        {SAVE_BAR.saveAs}
       </button>
       <button type="button" className="button" ref={opener} onClick={open}>
         {SAVE_BAR.open}

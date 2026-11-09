@@ -57,7 +57,10 @@ export const PLAN_ERROR = {
 };
 
 export const SAVE_BAR = {
-  save: 'Uložit do souboru',
+  /** Saves into the file in use; a plan with no file yet asks for one, as `saveAs` does. */
+  save: 'Uložit',
+  /** Asks for a file, saves into it and keeps saving there; the file before stays as it was. */
+  saveAs: 'Uložit jako…',
   open: 'Otevřít soubor',
   unsaved: 'Změny nejsou uložené do souboru',
   /** The dialog that asks before another file is opened while changes are not in a file. */

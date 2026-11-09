@@ -6,12 +6,12 @@ import type { ComponentProps } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { AppProvider, useApp } from './store';
 import { App } from './App';
-import { memoryStorage } from '../storage/adapter';
+import { browserStorage, memoryStorage } from '../storage/adapter';
 import type { StorageAdapter } from '../storage/adapter';
 import { inProcessRunner } from '../worker/runner';
 import { newAppData } from '../domain/defaults';
 import type { AppData } from '../domain/types';
-import { SaveFileError } from '../storage/saveFile';
+import { SaveFileError, serialize } from '../storage/saveFile';
 import { PLAN_ERROR, TAB_PANEL_SOON } from './text';
 
 afterEach(() => {
@@ -90,7 +90,7 @@ async function openAnyway() {
 
 // --- The brief's tests -----------------------------------------------------------------------
 
-it('shows the start screen when nothing is cached, then the app', async () => {
+it('shows the start screen when there is no plan yet, then the app', async () => {
   render(
     <AppProvider storage={memoryStorage(null)} runner={inProcessRunner}>
       <App />
@@ -103,7 +103,20 @@ it('shows the start screen when nothing is cached, then the app', async () => {
   expect(screen.getByText('Změny nejsou uložené do souboru')).toBeInTheDocument();
 });
 
-it('opens the app directly from the cache', () => {
+it('always opens at the start screen, whatever an older version left in the browser', () => {
+  // Phase 1.1 and older kept a copy of the plan in localStorage and opened it by themselves.
+  localStorage.setItem('shift-scheduler/v1', serialize(newAppData()));
+  try {
+    renderApp(browserStorage());
+    expect(screen.getByRole('button', { name: 'Začít nový' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Otevřít soubor' })).toBeInTheDocument();
+    expect(screen.queryByRole('tab')).toBeNull();
+  } finally {
+    localStorage.clear();
+  }
+});
+
+it('goes straight to the app when the storage hands in a plan, as the tests do', () => {
   render(
     <AppProvider storage={memoryStorage(newAppData())} runner={inProcessRunner}>
       <App />
@@ -113,7 +126,7 @@ it('opens the app directly from the cache', () => {
 });
 
 it('keeps data and shows the error when a file is broken', async () => {
-  // Ruled deviation: the data comes from the cache, so it is not known to be in a file, and
+  // Ruled deviation: the data the test starts with is not known to be in a file, so
   // opening another file asks first, in a dialog on the page (R33, R38). The test says yes.
   const s = memoryStorage(newAppData());
   s.openFile = async () => {
@@ -196,7 +209,9 @@ describe('the shell', () => {
   it('has the title, the save bar and the three tabs', () => {
     renderApp(memoryStorage(newAppData()));
     expect(screen.getByRole('heading', { level: 1, name: 'Plánování směn' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Uložit do souboru' })).toBeInTheDocument();
+    for (const name of ['Uložit', 'Uložit jako…', 'Otevřít soubor']) {
+      expect(screen.getByRole('button', { name })).toBeInTheDocument();
+    }
     expect(screen.getAllByRole('tab').map((tab) => tab.textContent)).toEqual([
       'Měsíc',
       'Tým',
@@ -270,7 +285,7 @@ describe('the shell', () => {
 // --- The save bar -----------------------------------------------------------------------------
 
 describe('the save bar', () => {
-  it('says that the changes are not in a file when the data came from the cache', () => {
+  it('says that the changes are not in a file when the data is in no file yet', () => {
     renderApp(memoryStorage(newAppData()));
     expect(screen.getByText('Změny nejsou uložené do souboru')).toBeInTheDocument();
   });
@@ -284,7 +299,7 @@ describe('the save bar', () => {
     const storage = memoryStorage(newAppData());
     renderApp(storage);
 
-    await userEvent.click(screen.getByRole('button', { name: 'Uložit do souboru' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Uložit' }));
     expect(await screen.findByText(`Uloženo do souboru ${shown}`)).toBeInTheDocument();
     expect(storage.saved).toHaveLength(1);
     expect(screen.queryByText('Změny nejsou uložené do souboru')).toBeNull();
@@ -292,7 +307,7 @@ describe('the save bar', () => {
 
   it('goes back to unsaved after a change', async () => {
     renderApp(memoryStorage(newAppData()));
-    await userEvent.click(screen.getByRole('button', { name: 'Uložit do souboru' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Uložit' }));
     await screen.findByText(/^Uloženo do souboru/);
 
     await userEvent.click(screen.getByRole('button', { name: 'Změnit' }));
@@ -314,6 +329,37 @@ describe('the save bar', () => {
     expect(screen.getByText('Ukládá se automaticky do plan.json')).toBeInTheDocument();
   });
 
+  it('saves into a new file on Uložit jako…, and from then on names that file', async () => {
+    const storage = memoryStorage(null);
+    storage.openFile = async () => {
+      storage.fileName = () => 'plan.json';
+      storage.canAutoSave = () => true;
+      return newAppData();
+    };
+    storage.saveFileAs = async (d) => {
+      storage.saved.push(serialize(d));
+      storage.fileName = () => 'novy.json';
+      return 'novy.json';
+    };
+    renderApp(storage);
+    await userEvent.click(screen.getByRole('button', { name: 'Otevřít soubor' }));
+    await screen.findByText('Ukládá se automaticky do plan.json');
+
+    await userEvent.click(screen.getByRole('button', { name: 'Uložit jako…' }));
+    expect(await screen.findByText('Ukládá se automaticky do novy.json')).toBeInTheDocument();
+    expect(storage.saved).toHaveLength(1);
+  });
+
+  it('stays as it was when Uložit jako… is cancelled', async () => {
+    const storage = memoryStorage(newAppData());
+    storage.saveFileAs = async () => {
+      throw abortError();
+    };
+    renderApp(storage);
+    await userEvent.click(screen.getByRole('button', { name: 'Uložit jako…' }));
+    expect(screen.getByText('Změny nejsou uložené do souboru')).toBeInTheDocument();
+    expect(screen.queryByRole('alert')).toBeNull();
+  });
 });
 
 // --- The question before another file is opened -----------------------------------------------
@@ -429,7 +475,7 @@ describe('the question before another file is opened', () => {
     const openFile = vi.fn(async () => null);
     storage.openFile = openFile;
     renderApp(storage);
-    await userEvent.click(screen.getByRole('button', { name: 'Uložit do souboru' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Uložit' }));
     await screen.findByText(/^Uloženo do souboru/);
 
     await ask();
@@ -440,7 +486,7 @@ describe('the question before another file is opened', () => {
 
   it('is asked again after the next change', async () => {
     renderApp(memoryStorage(newAppData()));
-    await userEvent.click(screen.getByRole('button', { name: 'Uložit do souboru' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Uložit' }));
     await screen.findByText(/^Uloženo do souboru/);
     await userEvent.click(screen.getByRole('button', { name: 'Změnit' }));
 
@@ -468,7 +514,7 @@ describe('errors', () => {
       throw new DOMException('Write access to the file was refused.', 'NotAllowedError');
     };
     renderApp(storage);
-    await userEvent.click(screen.getByRole('button', { name: 'Uložit do souboru' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Uložit' }));
     expect(await screen.findByRole('alert')).toHaveTextContent('Soubor se nepodařilo uložit.');
     expect(screen.getByText('Změny nejsou uložené do souboru')).toBeInTheDocument();
   });
@@ -483,7 +529,7 @@ describe('errors', () => {
     };
     renderApp(storage);
     await openAnyway();
-    await userEvent.click(screen.getByRole('button', { name: 'Uložit do souboru' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Uložit' }));
     expect(screen.queryByRole('alert')).toBeNull();
     expect(screen.getByRole('tab', { name: 'Měsíc' })).toBeInTheDocument();
   });
@@ -494,7 +540,7 @@ describe('errors', () => {
       throw new Error('boom');
     };
     renderApp(storage);
-    await userEvent.click(screen.getByRole('button', { name: 'Uložit do souboru' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Uložit' }));
     await screen.findByRole('alert');
 
     await userEvent.click(screen.getByRole('button', { name: 'Zavřít' }));
@@ -506,10 +552,10 @@ describe('errors', () => {
     const saveFile = vi.spyOn(storage, 'saveFile');
     saveFile.mockRejectedValueOnce(new Error('boom'));
     renderApp(storage);
-    await userEvent.click(screen.getByRole('button', { name: 'Uložit do souboru' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Uložit' }));
     await screen.findByRole('alert');
 
-    await userEvent.click(screen.getByRole('button', { name: 'Uložit do souboru' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Uložit' }));
     expect(await screen.findByText(/^Uloženo do souboru/)).toBeInTheDocument();
     expect(screen.queryByRole('alert')).toBeNull();
   });
