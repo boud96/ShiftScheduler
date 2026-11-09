@@ -52,9 +52,10 @@ function monthNumber(heading: string): number {
 test('plans a quarter month by month: all days covered, no must broken, nothing leaves', async ({
   page,
 }) => {
-  // Each month's run takes the 5 s set below, and the wait for its end is allowed 30 s: three
-  // waits that all run out still end before the test does, so a hang names the month.
-  test.setTimeout(150_000);
+  // Three runs of 10 s are more than the 30 s that a test is given by default. A run is waited for
+  // up to 30 s, so even three slow months end within the 120 s given here, and a month that hangs
+  // fails on its own wait and names the month.
+  test.setTimeout(120_000);
 
   const requests: string[] = [];
   page.on('request', (request) => {
@@ -68,14 +69,16 @@ test('plans a quarter month by month: all days covered, no must broken, nothing 
   await page.goto(fileUrl);
   await page.getByRole('button', { name: 'Začít nový' }).click();
 
-  // Pravidla: each run is given 5 s.
+  // Pravidla: each run is given 10 s, not the 5 s of plan-january.spec.ts. At 5 s the search runs
+  // short of time: in about 1 run of 8, February or March leaves someone one weekday shift short
+  // of FPD. At 10 s, and at the app's default of 20 s, every quarter probed was clean.
   await page.getByRole('tab', { name: 'Pravidla', exact: true }).click();
   const rules = page.getByRole('tabpanel', { name: 'Pravidla', exact: true });
   const budget = rules.getByLabel('Čas na generování (s)');
-  await budget.fill('5');
-  // A box that is left shows the number that is stored: it shows 5 only if 5 was stored.
+  await budget.fill('10');
+  // A box that is left shows the number that is stored: it shows 10 only if 10 was stored.
   await budget.blur();
-  await expect(budget).toHaveValue('5');
+  await expect(budget).toHaveValue('10');
 
   // Měsíc: step to January 2027. The month it opens on depends on today's date, so the loop reads
   // the heading and does not count clicks.
