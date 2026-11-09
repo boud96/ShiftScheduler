@@ -74,7 +74,7 @@ These replace the parts of wish W3 they overlap. W3's 6-day cap becomes the must
   - O ends at 22:00, one day off, then R1 starts at 06:00. That leaves 32 h of rest: if no longer rest touches that window, the rule is broken.
   - R1 (ends 14:00), one day off, then R1 leaves 40 h, which is fine.
 - **Breaking it.** The generator never breaks it. The team lead may break it by hand, and Kontrola then shows it in red like any other must.
-- **Month boundaries.** Windows that reach into the previous month use its last 7 days. Windows that reach beyond the 1st of the next month are checked when that month is planned.
+- **Month boundaries.** Windows that reach into the previous month use its last 7 days. The rest that began before those 7 days counts too: the app also reads the 7 days before them and starts the rest before the first shift of the row from the end of the person's last shift there (`restBefore`). Without it, a short rest that began just before the tail, such as 24 h after a night on the Sunday before it, would pass on an assumed long rest and show only in the previous month's Kontrola. Only when no shift is stored in that week is the time before the first shift unknown, and then it counts as rest. Windows that reach beyond the 1st of the next month are checked when that month is planned.
 
 ### 3.3 Nights for people who don't want them
 
@@ -97,6 +97,7 @@ In this section a **weekend shift** means every twelve-hour shift: an R12 or N12
 - It applies to everyone, including people who join or leave during the month.
 - If someone has `x` on some weekends, they get their shifts on the other weekends.
 - If a person's own requests make 2 impossible, the generator leaves it short and Kontrola shows it in red, as it does for hours below FPD. The generator never breaks a hard must to reach it.
+- A maximum of 12-hour shifts below 2, the person's own (§3.6) or the general one, lowers the minimum to that maximum, because the hard maximum wins over a minimum that may be left short; Kontrola then quotes the lowered value (for example `min. 1`) in place of a red line every month that nothing could clear.
 
 **Claiming a holiday.**
 - Holiday shifts pay a bonus, so they are popular.

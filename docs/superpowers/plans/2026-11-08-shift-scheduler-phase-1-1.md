@@ -76,7 +76,8 @@
 - [ ] **Step 1: Write the failing tests** in `saveFile.test.ts`:
   - `opens a version 1 file with the new fields at their defaults`. A v1 file without `doctor`, without person limits and without the new settings parses to `doctor: {}`, `maxTwelve: null`, `maxNights: null`, `maxDaysInRow: 6`, `minWeekendShifts: 2`, `weeklyRestHours: 35`, `wishLevels.W10: 3` and `schemaVersion: 2`.
   - `round-trips a version 2 file`. `parseSaveFile(serialize(data))` deep-equals `data`, where `data` has doctor notes and limits.
-  - `refuses a broken doctor note`. A note with `from >= to`, a non-integer, a value outside 0–1440, an unreal date or an unknown person id is refused with "Soubor je poškozený.".
+  - `refuses a broken doctor note`. A note with `from >= to`, a non-integer, a value outside 0–1440 or an unreal date is refused with "Soubor je poškozený.", whoever it belongs to.
+  - `drops the notes of a person who is not in the team` (ruling R32, which amends the first reading of this plan: a note of an unknown person id was refused). The other notes and all the cells stay; a day left with no note is dropped, as `removePerson` drops it. Cells of unknown people were always kept.
   - `takes a wrong-typed person limit as null`. `maxTwelve: "x"` becomes `null`, as `completePerson` does for other leaves.
   - `refuses version 3` with the newer-version message.
 
@@ -134,7 +135,7 @@
 
 **Files:**
 - Create: `src/domain/rules/restMusts.ts`
-- Modify: `src/domain/rules/types.ts` (MustId), `src/domain/rules/person.ts` (call the new rules), `src/domain/rules/personWishes.ts` (`rhythm`), `src/domain/format.ts` (if a plural helper is missing)
+- Modify: `src/domain/rules/types.ts` (MustId), `src/domain/rules/person.ts` (call the new rules), `src/domain/rules/personWishes.ts` (`rhythm`), `src/domain/format.ts` (if a plural helper is missing), `src/domain/context.ts` (`EnginePerson.restBefore`, ruling R7)
 - Test: `src/domain/rules/musts-rows.test.ts` (new), `src/domain/rules/wishes-rhythm.test.ts`
 
 **Interfaces:**
@@ -145,7 +146,9 @@
   - **M9:** a run longer than `settings.maxDaysInRow` costs `HARD × (length − max)`. Message `${days(length)} v kuse (max. ${max})`.
   - **M10:** a run of **6 or more** working days (a fixed threshold, `LONG_RUN = 6`; the design keeps it out of the settings) followed by exactly one day off and then work costs `HARD`. Message `po ${length} dnech práce jen 1 den volna (min. 2 dny)`. Each adds 1 to `stats.mustUnits`.
 - Produces: `export function weeklyRest(ctx: MonthContext, p: number, row: Uint8Array, stats: PersonStats, sink?: Sink): number` (**M11**). It works in absolute minutes from the start of `ctx.days[0]`:
-  - Build the person's shift intervals from `settings.shifts` over the tail, the month and `nextDay`. The time before the first known shift and after the end of the `nextDay` day counts as rest: unknown, so no alarm.
+  - Build the person's shift intervals from `settings.shifts` over the tail, the month and `nextDay`.
+  - The rest before the first interval starts when the person's last shift of the week before the tail ended. That is `EnginePerson.restBefore` (ruling R7): minutes from the start of `ctx.days[0]`, so 0 or less for a shift that ended before the tail, or more for a night that ends on its first day. It is read from the stored cells of the 7 days before the tail (`REST_LOOK_BACK_DAYS`), and is null when no shift is stored there. So a short rest that began before the tail is judged in this month too, and not only in the previous month's Kontrola.
+  - Only when `restBefore` is null is the time before the first shift unknown. It counts as rest, and so does the time after the end of the `nextDay` day: unknown, so no alarm.
   - Rests are the gaps between consecutive intervals.
   - A window `[w·1440, (w+7)·1440)` passes when some rest of at least `weeklyRestHours·60` minutes **overlaps** it. The rest counts whole, even when it starts before the window or ends after it.
   - Check every window with `w >= 0` that contains a day of the month and ends by the end of the `nextDay` day.
@@ -390,3 +393,41 @@
 - [ ] **Step 4: Update README** with a short paragraph: plan a quarter by generating January, February and March in turn; fairness carries over; save the file.
 - [ ] **Step 5: Run** `npm run typecheck && npm test && npm run test:e2e`. Expected: all pass.
 - [ ] **Step 6: Commit** `test: plan a quarter end to end; docs: quarterly planning`
+
+---
+
+### Task 6b: Repair the hours the search leaves one shift short (added by ruling R24)
+
+This task was not in the plan as first written. It was added after Task 10, when the quarter's end-to-end spec showed a gap in generator quality. Spec §3.8 lets hours below FPD (M6) stand only when they are forced. What follows is what was built, as rulings R25 to R30 amend the task's first brief.
+
+**Why it was added.**
+- Planned in the built app one month after another, a new plan's quarter ended with one person one weekday shift below FPD in about 1 quarter in 5 at a 5 s budget, and about 1 in 13 at 10 s. The cases were March (`169,5 h z 172,5 h`) and, once, February (`143 h z 150 h`).
+- March 2027 is tight by construction: Easter leaves 21 regular weekdays against an FPD of 23 × 7,5 h, so the weekday slots barely cover what the team needs.
+- The shortfall was not forced, since other seeds reach `Musí: 0` on the same months.
+- The brief expected a two-step valley that the annealing does not cross: A takes a shift from B, B is short in between, and B then takes a free slot elsewhere. Measured, the short person's row was packed instead. On every free day any shift breaks a must that costs HARD (a run of days, the days off after it, the 12-hour maximum), so neither a plain `set` nor that chain finds a shift for A. Only a trade that keeps A's number of shifts unblocks a day (R25).
+
+**Files.**
+- Create: `src/generator/repair.ts`, `src/generator/repair.test.ts`, and `src/test/shortFebruary.ts` (the fixtures of a February that the search left one shift short, made from a run of the quarter's steps in Node).
+- Modify: `src/generator/search.ts` (calls the repair), `src/generator/moves.ts` (exports `RANGE_MIN` and `RANGE_MAX`), `src/generator/search.test.ts`, `tests/e2e/plan-quarter.spec.ts` (the budget, 5 s again, and the failure message, which now lists the musts of Kontrola), `README.md` (the spec's budget and run time).
+
+**What `repairHours` does.**
+- `export function repairHours(st: SearchState, stop?: () => boolean): number` returns how many changes it made and leaves no move in hand. It draws no random number and reads no clock.
+- Each pass looks, for every person A below FPD as M6 judges it (`isBelowFpd`), at the changes that give A one more shift, and makes the one that lowers the score the most. It repeats until no change gains.
+  - A `set` of A on a day A is free and empty, in each code that fits the day.
+  - A chain: B gives A its shift on such a day (`swapDay`) and makes it up with a `set` of B on a day B is free and empty.
+  - Either of these after one trade that keeps A's number of shifts (R25): a `swapDay` on a day both work, a `swapRange` of 2 to 7 days that hands back as many shifts as it hands over, an `exchange` of 1 or 2 days, or a `shiftMove` of one of A's shifts to an empty day of the same type.
+- Every step is skipped if `breaksHardMust`, tried with `tryMove`, and a trade is undone by its inverse. The undo is exact to the last bit of the score, so a call that finds nothing leaves the rows and the score as they were. A change counts as a gain only if it lowers the score by more than rounding can (`GAIN`).
+- It changes free cells of the month only, in codes that fit the day, never a fixed cell. It never breaks a must that costs HARD. It changes nothing when the shortfall is forced.
+- Each change adds a shift to the month, so the number of passes is bounded and the loop ends.
+- `stop` (budget mode only) is asked before each trade. Once it says so, the pass in hand is dropped and the repair ends, with the changes made before it kept (R29).
+
+**Where `search` calls it.**
+- At the end of each segment that ran at least one iteration (R26, R28), and on the early return, whether the user stopped the search (`Zastavit`, Stop) or the time ran out. The next segment anneals from the repaired month.
+- Not when the best month has no must unit, since nobody is then below FPD. Not when the best month has been repaired and has not changed since either: the repair is deterministic and would find nothing.
+- With a time budget the repair tries no new trade once the search has run 200 ms past the budget (R27). After a stop before the budget is spent it gets 200 ms from the stop (R30). Without a budget it gets no stop and reads no clock, so the result stays a function of the inputs, the seed and `maxIterations`.
+
+**Tests.**
+- `repair.test.ts`: a direct set; a chain through a second person; a trade first when every free day is blocked; only the trades that keep the number of shifts; nothing changed when the shortfall is forced (rows and score identical); fixed cells untouched; no must that costs HARD broken; the February that the search left one shift short is repaired; determinism; the stop.
+- `search.test.ts`: the same February, searched with 150,000 iterations, ends with no broken must. A search stopped after one iteration on March 2027 still repairs its best month. The stops that the repair is given are those of R27 and R30. A best month is not repaired again until it has changed.
+- `scenarios.test.ts` is run, not weakened. The sweep over seeds 1–24 gave each scenario the same pass rate as before.
+- Measured at the end of the task: 200 of 200 quarters clean in Node at 600,000 iterations a month against 158 of 200 before, and 50 of 50 in the browser at 5 s against 41 of 50. Iterations per second did not change. The repair costs up to about 70 ms at the end of a segment and has a worst case of about 0.7 s a pass on a month with many open rows.
