@@ -17,6 +17,7 @@ import type { RuleId } from '../domain/rules/types';
 import type { CodeName, PersonId, Settings } from '../domain/types';
 import { scenario } from '../test/scenarios';
 import type { ScenarioName } from '../test/scenarios';
+import { januaryApplied } from '../test/shortFebruary';
 
 const jan = () => { const d = newAppData(); d.people = syntheticTeam(); return buildMonthGrid(d, '2027-01'); };
 
@@ -689,5 +690,19 @@ describe('construct', () => {
       '2027-02-13 chybí R12',
       '2027-02-14 chybí R12',
     ]);
+  });
+});
+
+describe('repair of the hours', () => {
+  it('brings up to FPD the person whom the annealing left one shift short', async () => {
+    // February 2027 of a new plan, after January as the app generated it (see shortFebruary.ts).
+    // With seed 12 and 150,000 iterations, the search before the repair left p8 at 143 h of 150 h:
+    // every free day of p8's blocked by the days in a row or the days off after them, and nothing
+    // else broken.
+    const g = buildMonthGrid(januaryApplied(), '2027-02');
+    const r = await search(g.ctx, g.rows, g.fixed, { seed: 12, maxIterations: 150_000 });
+    const musts = evaluateMonth(g.ctx, r.rows, true).findings.filter((f) => f.severity === 'must');
+    const who = (person: number | null) => (person === null ? 'the day' : g.personIds[person]);
+    expect(musts.map((f) => `${who(f.person)}: ${f.message}`)).toEqual([]);
   });
 });

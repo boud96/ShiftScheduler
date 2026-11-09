@@ -39,8 +39,8 @@ export type Move =
 /** How often each kind of move is proposed, as shares of all the moves. */
 const PROBABILITY = { swapDay: 0.3, set: 0.1, swapRange: 0.2, shiftMove: 0.1, exchange: 0.3 };
 /** The fewest and the most days a `swapRange` covers. */
-const RANGE_MIN = 2;
-const RANGE_MAX = 7;
+export const RANGE_MIN = 2;
+export const RANGE_MAX = 7;
 /** The share of exchanges whose two ranges are 2 days long; the others are 1 day long. */
 const EXCHANGE_LONG = 0.3;
 /** How many random picks a proposal makes before it gives up. */

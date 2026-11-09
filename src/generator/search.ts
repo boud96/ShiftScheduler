@@ -1,6 +1,7 @@
 import type { MonthContext } from '../domain/context';
 import { construct } from './construct';
 import { proposeMove } from './moves';
+import { repairHours } from './repair';
 import { mulberry32 } from './rng';
 import { SearchState } from './state';
 
@@ -77,6 +78,11 @@ const START_TEMPERATURE = 60;
 const END_TEMPERATURE = 0.3;
 /** With a time budget, the clock is read every this many iterations and at each report. */
 const CLOCK_EVERY = 256;
+/**
+ * With a time budget, how far past it the repair of the hours may go: it tries no new trade once
+ * the search has run this many milliseconds longer than the budget.
+ */
+const REPAIR_OVERRUN_MS = 200;
 
 /**
  * The temperature once `fraction` of a segment has passed, of its iterations or of its time. It
@@ -96,6 +102,14 @@ function wholeCount(value: number | undefined, fallback: number): number {
   return Number.isFinite(count) && count >= 1 ? count : fallback;
 }
 
+/**
+ * A stop for the repair: true once `ms` milliseconds have passed since `started`, read from the
+ * clock as the search's own out-of-time check reads it.
+ */
+function stopAfter(started: number, ms: number): () => boolean {
+  return () => performance.now() - started >= ms;
+}
+
 /** Lets other work run first, such as a worker taking in a message to stop. */
 function pause(): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, 0));
@@ -104,9 +118,9 @@ function pause(): Promise<void> {
 /**
  * Searches for the month with the lowest score by simulated annealing, starting from `rows` (which
  * it leaves as they are), and returns the best month it finds. It never changes a fixed cell, and
- * never breaks a must that costs HARD: `construct` makes no such move, and the annealing keeps
- * none. A shift left uncovered (M1) or hours below FPD (M6) cost far more than any wish, so it
- * leaves one only where it finds no way around it.
+ * never breaks a must that costs HARD: `construct` and the repair make no such move, and the
+ * annealing keeps none. A shift left uncovered (M1) or hours below FPD (M6) cost far more than any
+ * wish, so it leaves one only where it finds no way around it.
  *
  * It runs in `restarts` segments. The first starts from the draft `construct` builds, each later
  * one from the best month so far. In each segment the temperature T falls from 60 to 0.3. A move
@@ -123,6 +137,14 @@ function pause(): Promise<void> {
  *
  * Every `progressEvery` iterations it lets other work run, reports progress, and stops if
  * `shouldStop` says so or the time budget has run out.
+ *
+ * At the end of each segment that ran, and when it stops early, `repairHours` repairs the best
+ * month so far: it gives someone below FPD a shift that the annealing cannot reach, behind a
+ * valley of the score. The next segment starts from the repaired month, so its wishes are
+ * annealed again. A best month with no must unit has nobody below FPD, and is left as it is. With
+ * a time budget the repair tries no new trade once the search has run REPAIR_OVERRUN_MS past the
+ * budget; without one it reads no clock, and the result stays a function of the inputs, the seed
+ * and `maxIterations`.
  */
 export async function search(
   ctx: MonthContext,
@@ -153,6 +175,20 @@ export async function search(
     mustUnits: bestMustUnits,
     iterations: done,
   });
+  // With a time budget the repair stops when the search's own out-of-time check would say it is
+  // REPAIR_OVERRUN_MS past the budget.
+  const repairStop =
+    budget === undefined ? undefined : stopAfter(started, budget + REPAIR_OVERRUN_MS);
+  /** Repairs the hours of the best month so far, if it has a must unit, and keeps what it gains. */
+  const repair = (): void => {
+    if (bestMustUnits === 0) return;
+    st.reset(best);
+    if (repairHours(st, repairStop) > 0) {
+      bestScore = st.score;
+      bestMustUnits = st.mustUnits;
+      st.snapshot(best);
+    }
+  };
 
   // With a time budget, segment k has the time from k to k + 1 times `segmentMs` after `begin`.
   const begin = performance.now();
@@ -161,6 +197,7 @@ export async function search(
   for (let k = 0; k < restarts && done < iterations; k++) {
     if (k > 0) st.reset(best);
     const from = begin + k * segmentMs;
+    const doneBefore = done;
     // The iterations the segment may run: without a time budget its share, with one all that are
     // left, since its time ends it.
     const len =
@@ -201,9 +238,14 @@ export async function search(
           temperature: temperature(fraction),
         });
         const outOfTime = budget !== undefined && elapsedMs >= budget;
-        if (opts.shouldStop?.() === true || outOfTime) return result();
+        if (opts.shouldStop?.() === true || outOfTime) {
+          repair();
+          return result();
+        }
       }
     }
+    // a segment whose time was up before it began found nothing new to repair
+    if (done > doneBefore) repair();
   }
   return result();
 }
