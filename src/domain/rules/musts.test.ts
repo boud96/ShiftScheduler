@@ -766,6 +766,25 @@ describe('M13 in detail', () => {
       '5 nočních (max. 0)',
     ]);
   });
+  it('counts a claimed N12 as a night, though a claimed shift is no 12-hour shift', () => {
+    // Fri 1 Jan 2027 is a public holiday, and the N12 pinned on it is claimed: extra for M5 and
+    // M12, but the night is worked all the same
+    const k = ctxFor('2027-01', [{ maxNights: 0, maxTwelve: 0, pinned: { '2027-01-01': 'N12' } }]);
+    const ev = run(k, rowsOf(k, ['N12']));
+    expect(ev.persons[0]).toMatchObject({ twelve: 1, claimedTwelve: 1, nights: 1 });
+    expect(rules(ev, 'M5')).toEqual([]);
+    expect(rules(ev, 'M13')).toEqual([{
+      rule: 'M13', severity: 'must', person: 0, days: [k.first],
+      message: '1 noční (max. 0)', penalty: HARD,
+    }]);
+    // and it is one of the nights that a maximum of 1 allows: a second night is over it
+    const one = ctxFor('2027-01', [{ maxNights: 1, pinned: { '2027-01-01': 'N12' } }]);
+    expect(found(one, 'M13', 'N12')).toEqual([]);
+    expect(found(one, 'M13', 'N12 - - N')).toEqual([{
+      rule: 'M13', severity: 'must', person: 0, days: [one.first, one.first + 3],
+      message: '2 noční (max. 1)', penalty: HARD,
+    }]);
+  });
   it('is a must of its own, besides the strong wish of a person who never takes nights', () => {
     const k = ctxFor('2027-02', [{ prefs: { nights: 'never' }, maxNights: 0 }]);
     const ev = run(k, rowsOf(k, ['N']));

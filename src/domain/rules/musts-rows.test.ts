@@ -297,6 +297,26 @@ describe('M11 and the last shift before the tail', () => {
       message: 'jen 32 h volna v kuse za 7 dní (min. 32,5 h)', penalty: HARD,
     }]);
   });
+  it('quotes a short rest that began before the tail, when it is the longest in the window', () => {
+    // The O of Sun 24 January ends at 22:00, 2 h before the tail begins (`restBefore` is -120):
+    // 32 h to the R1 of Tue 26, where nine days of R1 begin, with rests of 16 h between them. The
+    // windows from Tue 26 and from Wed 27 fail, and the longest rest of the first is the 32 h that
+    // began before the first day of the row.
+    const k = ctxFor('2027-02', [{ before: '- - - - - - O' }]);
+    expect(k.people[0].restBefore).toBe(-120);
+    expect(found('M11', 'R1 R1 R1', '- R1 R1 R1 R1 R1 R1', k)).toEqual([{
+      rule: 'M11', severity: 'must', person: 0, days: [k.first, k.first + 1],
+      message: 'jen 32 h volna v kuse za 7 dní (min. 35 h)', penalty: 2 * HARD,
+    }]);
+    // With no shift stored the week before, the time before the first R1 is unknown, so it counts
+    // as rest that reaches the window from Tue 26: that one passes, the window from Wed 27 alone
+    // fails, and its longest rest is one of 16 h.
+    const unknown = ctxFor('2027-02', 1);
+    expect(found('M11', 'R1 R1 R1', '- R1 R1 R1 R1 R1 R1', unknown)).toEqual([{
+      rule: 'M11', severity: 'must', person: 0, days: [unknown.first, unknown.first + 1],
+      message: 'jen 16 h volna v kuse za 7 dní (min. 35 h)', penalty: HARD,
+    }]);
+  });
   it('takes the time before the first shift for rest when no shift is stored the week before', () => {
     const none = ctxFor('2027-02', 1, { weeklyRestHours: 32.5 });
     expect(none.people[0].restBefore).toBeNull();

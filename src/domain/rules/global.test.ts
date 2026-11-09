@@ -195,6 +195,33 @@ describe('W7 in detail', () => {
       quiet(0, 'víc směn o svátcích než ostatní', 0.25),
     ]);
   });
+  it('leaves a claimed N12 out of the 12-hour count, not out of the nights', () => {
+    // Fri 1 Jan 2027 is a public holiday, and the first person has an N12 pinned on it: claimed.
+    // It is no 12-hour shift of the month, but it is a night, and a shift on a holiday. The festive
+    // days are left out, so that 1 Jan is no count of its own here.
+    const needed: PersonPatch = { prefs: { nights: 'ifNeeded' } };
+    const c = ctxFor('2027-01', [{ ...needed, pinned: { '2027-01-01': 'N12' } }, needed], {
+      festiveDays: [],
+    });
+    // nights 1 and 0, holiday shifts 1 and 0: half a shift away in each, 0.25 units each; the
+    // 12-hour shifts that count are 0 and 0, so there is no finding of them
+    expect(listed(found(c, 'W7', [at({ 0: 'N12' }), '']), c)).toEqual([
+      quiet(1, 'méně nočních než ostatní', 0.25),
+      quiet(1, 'méně směn o svátcích než ostatní', 0.25),
+      quiet(0, 'víc nočních než ostatní', 0.25),
+      quiet(0, 'víc směn o svátcích než ostatní', 0.25),
+    ]);
+    // the same N12 with no claim is a 12-hour shift of the month as well
+    const plain = ctxFor('2027-01', [needed, needed], { festiveDays: [] });
+    expect(listed(found(plain, 'W7', [at({ 0: 'N12' }), '']), plain).map((f) => f.message)).toEqual([
+      'méně dvanáctihodinových směn než ostatní',
+      'méně nočních než ostatní',
+      'méně směn o svátcích než ostatní',
+      'víc dvanáctihodinových směn než ostatní',
+      'víc nočních než ostatní',
+      'víc směn o svátcích než ostatní',
+    ]);
+  });
   it('counts a shift of any kind on a festive day as a count of its own', () => {
     const c = ctxFor('2027-02', 2, { festiveDays: ['02-02', '02-03'] });
     expect(listed(found(c, 'W7', [at({ 1: 'R1', 2: 'R1' })]), c)).toEqual([
