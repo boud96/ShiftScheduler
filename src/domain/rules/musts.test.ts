@@ -664,6 +664,66 @@ describe("a person's own maximum of 12-hour shifts, in detail", () => {
   });
 });
 
+// R31: the HARD maximum of 12-hour shifts wins over the minimum of weekend shifts, so a person is
+// never asked for more weekend shifts than they may work 12-hour shifts. February 2027: its
+// weekends are days 5-6, 12-13, 19-20 and 26-27 (counted from 0), and the minimum is 2.
+describe("M12 against a person's own maximum of 12-hour shifts", () => {
+  const m12 = (maxTwelve: number | null, ...strips: string[]) =>
+    found(ctxFor('2027-02', [{ maxTwelve }]), 'M12', ...strips);
+
+  it('asks nothing of a person whose maximum is 0, who has no weekend shift', () => {
+    expect(m12(0)).toEqual([]);
+  });
+  it('asks nothing more than the maximum: 1 weekend shift meets a maximum of 1', () => {
+    expect(m12(1, r12(5))).toEqual([]);
+  });
+  it('asks the maximum, and quotes it, when that is below the minimum', () => {
+    expect(m12(1)).toEqual([{
+      rule: 'M12', severity: 'must', person: 0, days: [],
+      message: '0 víkendových směn (min. 1)', penalty: WEEKEND_SHORT,
+    }]);
+    expect(m12(1, 'R1')[0].penalty).toBe(WEEKEND_SHORT); // and a shift on a weekday is none
+  });
+  it('asks the minimum of a person whose maximum is above it', () => {
+    expect(m12(3, r12(5))).toEqual([{
+      rule: 'M12', severity: 'must', person: 0, days: [],
+      message: '1 víkendová směna (min. 2)', penalty: WEEKEND_SHORT,
+    }]);
+    expect(m12(3, r12(5, 6))).toEqual([]);
+    expect(m12(2, r12(5))[0].message).toBe('1 víkendová směna (min. 2)'); // a maximum of 2 too
+  });
+  it('asks the minimum when the person has no maximum of their own, and the general is above', () => {
+    expect(m12(null, r12(5))[0].message).toBe('1 víkendová směna (min. 2)');
+    expect(m12(null, r12(5, 6))).toEqual([]);
+  });
+  it('holds everyone to a general maximum below the minimum', () => {
+    const k = ctxFor('2027-02', 3, { maxTwelvePerMonth: 1 }); // the minimum stays 2
+    // the first has 1 weekend shift, the second none, the third is over the maximum with 2
+    const ev = run(k, rowsOf(k, [r12(5), '', r12(5, 6)]));
+    expect(rules(ev, 'M12').map((f) => [f.person, f.message])).toEqual([
+      [1, '0 víkendových směn (min. 1)'],
+    ]);
+    expect(rules(ev, 'M5').map((f) => f.person)).toEqual([2]); // the maximum holds: M5 only
+  });
+  it("follows the person's own maximum, not the general one, when both are set", () => {
+    const k = ctxFor('2027-02', [{ maxTwelve: 3 }, { maxTwelve: null }], { maxTwelvePerMonth: 1 });
+    const ev = run(k, rowsOf(k, [r12(5), r12(5)]));
+    // The first may work 3, so the minimum of 2 stands. The second is held to the general maximum
+    // of 1, and has met it.
+    expect(rules(ev, 'M12').map((f) => [f.person, f.message])).toEqual([
+      [0, '1 víkendová směna (min. 2)'],
+    ]);
+  });
+  it('is no unit and no score for a person who has met the lowered minimum', () => {
+    const k = bare([{ maxTwelve: 1 }]);
+    const met = run(k, rowsOf(k, [r12(5)]));
+    expect([met.persons[0].mustUnits, met.mustUnits, met.score]).toEqual([0, 0, 0]);
+    const none = run(k, rowsOf(k, []));
+    expect([none.persons[0].mustUnits, none.mustUnits, none.score])
+      .toEqual([1, 1, WEEKEND_SHORT]);
+  });
+});
+
 describe('M13 in detail', () => {
   it('is broken by a night over the maximum: HARD, the nights as days, the count in text', () => {
     expect(overNights(2, 'N N N')).toEqual([{

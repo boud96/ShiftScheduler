@@ -69,7 +69,8 @@ export function twelveDays(ctx: MonthContext, p: number, row: Uint8Array): numbe
  * adds its penalty to the score, but no must unit.
  *
  * A claimed holiday shift is extra: M5 and M12 count the 12-hour shifts of the month without them
- * (`twelve - claimedTwelve`). M5 follows the person's own maximum (`EnginePerson.maxTwelve`).
+ * (`twelve - claimedTwelve`). M5 follows the person's own maximum (`EnginePerson.maxTwelve`), and
+ * M12 asks no more weekend shifts than that maximum allows.
  *
  * Rules that look at two days read the last tail day for day 1, but only a finding that touches a
  * day of the month counts. They read the day after the month too, for the pair that its last day
@@ -210,8 +211,10 @@ export function personMusts(
   }
 
   // M12: at least `minWeekendShifts` weekend shifts, WEEKEND_SHORT for each one short, and one
-  // unit however many are short. The generator may leave it short when it must, like M6.
-  const minWeekend = settings.minWeekendShifts;
+  // unit however many are short. The generator may leave it short when it must, like M6. The HARD
+  // maximum of 12-hour shifts wins over the minimum: nobody is asked for more weekend shifts than
+  // they may work, so a maximum below the minimum (the person's own, or a general one) lowers it.
+  const minWeekend = Math.min(settings.minWeekendShifts, maxTwelve);
   const weekendShort = minWeekend - counted;
   if (weekendShort > 0) {
     score += WEEKEND_SHORT * weekendShort;

@@ -1463,6 +1463,22 @@ describe('the totals of a person', () => {
       expect(checks().getByText('Operátor B: 2 víkendové směny (min. 3)')).toBeVisible();
     });
 
+    it('not for a person at their own maximum, when that is below the minimum (R31)', () => {
+      const data = plan(3);
+      data.people[0].maxTwelve = 1; // A may work one 12-hour shift: one weekend shift is enough
+      data.people[1].maxTwelve = 0; // B none at all: nothing is asked of B
+      put(data, '2027-01-02', 'A', 'R12');
+      renderMonth(data); // C has no maximum of their own, and no weekend shift
+      expect(twelve('A')).not.toHaveClass('below-weekend');
+      expect(twelve('B')).not.toHaveClass('below-weekend');
+      expect(twelve('C')).toHaveClass('below-weekend');
+      // Kontrola agrees: it lists M12 for C alone
+      const lines = checks().getAllByRole('button', { name: /víkendových směn \(min\./ });
+      expect(lines.map((line) => line.textContent)).toEqual([
+        'Operátor C: 0 víkendových směn (min. 2)',
+      ]);
+    });
+
     it('with each edit', async () => {
       const data = plan(1);
       put(data, '2027-01-02', 'A', 'R12');
