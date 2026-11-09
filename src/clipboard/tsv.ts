@@ -19,13 +19,14 @@ import type {
 const MINUTES = String.raw`(?:[:.]([0-5]\d))?`;
 
 /**
- * An `L`, the time the appointment starts, a hyphen or an en dash, the time it ends. A time is the
- * hours (0 to 23, with or without a leading zero) and, if given, the minutes (`MINUTES`). The end
- * may also be 24, which `parseDoctor` lets through with no minutes only. Spaces may follow the L
- * and surround the dash.
+ * An `L`, the time the appointment starts, a hyphen or an en dash (U+2013), the time it ends. A
+ * time is the hours (0 to 23, with or without a leading zero) and, if given, the minutes
+ * (`MINUTES`). The end may also be 24, the end of the day, with no minutes or `:00`: the pattern
+ * lets 24 take any minutes, and `parseDoctor` refuses what is past 24:00. Whitespace may follow
+ * the L and surround the dash.
  */
 const DOCTOR = new RegExp(
-  String.raw`^L\s*([01]?\d|2[0-3])${MINUTES}\s*[-–]\s*(2[0-4]|[01]?\d)${MINUTES}$`,
+  String.raw`^L\s*([01]?\d|2[0-3])${MINUTES}\s*[-\u2013]\s*(2[0-4]|[01]?\d)${MINUTES}$`,
   'i',
 );
 
@@ -122,13 +123,20 @@ function readCell(value: string): Cell {
   return note === null ? { kind: 'other' } : { kind: 'doctor', note };
 }
 
+/** A value that starts like a doctor's note, an `L` and a digit, whether or not it is a note. */
+const LOOKS_LIKE_NOTE = /^L\s*\d/i;
+
 /**
- * The first column holds names, not days, when it has a value and none of its values is a code or a
- * doctor's note. An empty first column is a day column: a copied row whose first day is empty
- * starts that way, and so does one whose first day is a note.
+ * The first column holds names, not days, when it has a value and none of its values is a code, a
+ * doctor's note or a value that starts like one (`L 8`, a note whose end is missing: a mistake in
+ * a day, and no name). An empty first column is a day column: a copied row whose first day is
+ * empty starts that way, and so does one whose first day is a note. The value that starts like a
+ * note and is none is listed in `ignored`, as any value that is no use.
  */
 function hasNamesColumn(rows: string[][]): boolean {
-  const filled = rows.map((cells) => readCell(cells[0]).kind).filter((kind) => kind !== 'empty');
+  const filled = rows
+    .map((cells) => (LOOKS_LIKE_NOTE.test(cells[0].trim()) ? 'day' : readCell(cells[0]).kind))
+    .filter((kind) => kind !== 'empty');
   return filled.length > 0 && filled.every((kind) => kind === 'other');
 }
 
@@ -143,8 +151,9 @@ function hasNamesColumn(rows: string[][]): boolean {
  * `parseDoctor`) to `doctorWrites`, both under the same rules: the same people and the same days. A
  * value that is neither, and a value that has no person (a row beyond the last person, or a start
  * person who is not in the month grid) or no valid date, is listed in `ignored`. A first column
- * holding only values that are neither codes nor notes (and at least one) is taken for names and
- * left out, unlisted; `namesColumn` says so. `data` is not changed.
+ * holding only values that are neither codes nor notes nor start like a note (an `L` and a digit),
+ * and at least one, is taken for names and left out, unlisted; `namesColumn` says so. `data` is
+ * not changed.
  */
 export function planPaste(
   data: AppData,

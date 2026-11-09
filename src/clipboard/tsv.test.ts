@@ -477,7 +477,7 @@ const MORNING: DoctorNote = { from: 480, to: 720 };
 
 describe('parseDoctor', () => {
   it("parses doctor's notes in the usual forms", () => {
-    for (const text of ['L 8-12', 'L8-12', 'l 8:00 - 12:00', 'L 8–12']) {
+    for (const text of ['L 8-12', 'L8-12', 'l 8:00 - 12:00', 'L 8\u201312']) {
       expect(parseDoctor(text), text).toEqual(MORNING);
     }
     expect(parseDoctor('L 8:30-12')).toEqual({ from: 510, to: 720 });
@@ -486,7 +486,7 @@ describe('parseDoctor', () => {
     // The forms beyond these (the tables below go through them one by one): spaces around the
     // cell, a leading zero, a dot for the colon, 24 as the end of the day, and what is not a time
     // or has text after it.
-    expect(parseDoctor('  l 08:00 – 12:00  ')).toEqual(MORNING);
+    expect(parseDoctor('  l 08:00 \u2013 12:00  ')).toEqual(MORNING);
     expect(parseDoctor('L 8.30-12')).toEqual({ from: 510, to: 720 });
     expect(parseDoctor('L 8.30-12.15')).toEqual({ from: 510, to: 735 });
     expect(parseDoctor('L 8-24')).toEqual({ from: 480, to: 1440 });
@@ -500,7 +500,9 @@ describe('parseDoctor', () => {
     ['spaces around the cell', '  L 8-12  ', MORNING],
     ['a no-break space around the cell, as Excel can leave one', '\u00a0L 8-12\u00a0', MORNING],
     ['more than one space', 'L  8  -  12', MORNING],
-    ['spaces around an en dash', 'L 8 – 12', MORNING],
+    ['no-break spaces inside the note', 'L\u00a08\u00a0-\u00a012', MORNING],
+    ['a tab inside the note', 'L\t8-12', MORNING],
+    ['spaces around an en dash', 'L 8 \u2013 12', MORNING],
     ['spaces on one side of the dash', 'L 8 -12', MORNING],
     ['no space after the L but one before the dash', 'L8 -12', MORNING],
     ['a leading zero on the hours', 'L 08-12', MORNING],
@@ -511,11 +513,11 @@ describe('parseDoctor', () => {
     ['hour 23', 'L 22-23', { from: 1320, to: 1380 }],
     ['minutes on both times', 'L 8:30-12:45', { from: 510, to: 765 }],
     ['minutes on the end only', 'L 8-12:30', { from: 480, to: 750 }],
-    ['minutes with an en dash', 'L 8:00–12:00', MORNING],
+    ['minutes with an en dash', 'L 8:00\u201312:00', MORNING],
     ['a dot between the hours and the minutes', 'L 8.30-12', { from: 510, to: 720 }],
     ['a dot on both times', 'L 8.30-12.15', { from: 510, to: 735 }],
     ['a dot on the end only', 'L 8-12.30', { from: 480, to: 750 }],
-    ['a dot, spaces and an en dash', 'l 8.00 – 12.00', MORNING],
+    ['a dot, spaces and an en dash', 'l 8.00 \u2013 12.00', MORNING],
     ['a dot with a leading zero hour', 'L 08.30-09.45', { from: 510, to: 585 }],
     ['a dot on one time and a colon on the other', 'L 8:30-12.15', { from: 510, to: 735 }],
     ['24.00 as the end of the day', 'L 22-24.00', { from: 1320, to: 1440 }],
@@ -683,7 +685,7 @@ describe("planPaste, doctor's notes", () => {
   });
   it('reads L in the usual forms, with spaces around it', () => {
     const { d, ids } = team();
-    const plan = planJan(d, ids[0], jan(1), ' l 8-12 \tL8–12\tL 8:00 - 12:00\t\u00a0L 08-12');
+    const plan = planJan(d, ids[0], jan(1), ' l 8-12 \tL8\u201312\tL 8:00 - 12:00\t\u00a0L 08-12');
     expect(plan.doctorWrites.map((w) => w.note)).toEqual(Array(4).fill(MORNING));
     expect(plan.writes).toEqual([]);
     expect(plan.ignored).toEqual([]);
@@ -760,15 +762,44 @@ describe("planPaste, doctor's notes", () => {
       expect(plan.writes).toEqual([{ personId: ids[1], date: jan(1), code: 'x' }]);
       expect(plan.ignored).toEqual([]);
     });
-    it('is names when its values are L with no usable time', () => {
+    it('is a day column when it holds an L with a time that is no note, which is listed', () => {
       const { d, ids } = team();
-      const plan = planJan(d, ids[0], jan(1), 'L 8\tx\nL\tR1');
-      expect(plan.namesColumn).toBe(true);
+      // 'L 8' is a note without its end: the cell of the first day, and no name
+      const plan = planJan(d, ids[0], jan(1), 'L 8\tR1\tR2');
+      expect(plan.namesColumn).toBe(false);
       expect(plan.doctorWrites).toEqual([]);
+      expect(plan.writes).toEqual([
+        { personId: ids[0], date: jan(2), code: 'R1' },
+        { personId: ids[0], date: jan(3), code: 'R2' },
+      ]);
+      expect(plan.ignored).toEqual([{ row: 0, col: 0, value: 'L 8' }]);
+    });
+    it('is a day column when one value is an L with a time that is no note, a bare L too', () => {
+      const { d, ids } = team();
+      const plan = planJan(d, ids[0], jan(1), 'L 8\tx\nL\tR1\n l8:30-\tDOV');
+      expect(plan.namesColumn).toBe(false);
+      expect(plan.doctorWrites).toEqual([]);
+      expect(plan.writes).toEqual([
+        { personId: ids[0], date: jan(2), code: 'x' },
+        { personId: ids[1], date: jan(2), code: 'R1' },
+        { personId: ids[2], date: jan(2), code: 'DOV' },
+      ]);
+      expect(plan.ignored).toEqual([
+        { row: 0, col: 0, value: 'L 8' },
+        { row: 1, col: 0, value: 'L' },
+        { row: 2, col: 0, value: ' l8:30-' },
+      ]);
+    });
+    it('is names when its values are words, also words that start with an L', () => {
+      const { d, ids } = team();
+      const plan = planJan(d, ids[0], jan(1), 'Lenka\tx\nL. Novák\tR1\nLadislav\tDOV');
+      expect(plan.namesColumn).toBe(true);
       expect(plan.writes).toEqual([
         { personId: ids[0], date: jan(1), code: 'x' },
         { personId: ids[1], date: jan(1), code: 'R1' },
+        { personId: ids[2], date: jan(1), code: 'DOV' },
       ]);
+      expect(plan.ignored).toEqual([]);
     });
   });
 
