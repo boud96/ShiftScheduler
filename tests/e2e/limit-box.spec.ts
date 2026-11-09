@@ -40,7 +40,7 @@ const limitBox = (page: Page) =>
   page
     .getByRole('tabpanel', { name: 'Tým', exact: true })
     .getByRole('article', { name: 'Operátor 1', exact: true })
-    .getByLabel('Max. nočních měsíčně', { exact: true });
+    .getByLabel('Max. nočních za měsíc', { exact: true });
 
 /** The line of Kontrola about nights over the limit, on the Month screen: there is none or one. */
 const nightsLine = (page: Page) =>

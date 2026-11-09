@@ -107,8 +107,8 @@ const AFTER_WEEKEND = {
 };
 const AFTER_NIGHTS = 'Po posledním nočním (po 1 dni volna) může přijít';
 const STARTING_COUNTS = 'Počáteční počty (před prvním naplánovaným měsícem)';
-const MAX_TWELVE = 'Max. 12h směn měsíčně';
-const MAX_NIGHTS = 'Max. nočních měsíčně';
+const MAX_TWELVE = 'Max. 12h směn za měsíc';
+const MAX_NIGHTS = 'Max. nočních za měsíc';
 
 // --- The brief's tests -----------------------------------------------------------------------
 
@@ -174,8 +174,8 @@ describe('a card', () => {
     const numbers = [
       'Dovolená / rok',
       'MyDay / rok',
-      'Max. 12h směn měsíčně',
-      'Max. nočních měsíčně',
+      'Max. 12h směn za měsíc',
+      'Max. nočních za měsíc',
       '12h směny',
       'Noční směny',
       'Svátky',

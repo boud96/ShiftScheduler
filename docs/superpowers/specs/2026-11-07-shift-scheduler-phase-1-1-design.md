@@ -127,8 +127,8 @@ The team lead writes doctor's appointments in Excel as `L` with a time, for exam
 
 Each person's card on the Tým (Team) screen gets two optional numbers:
 
-- **"max. 12h směn měsíčně"** (EN: max 12-hour shifts per month). It replaces the general maximum of 3 for that person. Claimed holiday shifts still don't count toward it.
-- **"max. nočních měsíčně"** (EN: max nights per month). It limits that person's nights (N and N12) per month. Without it there is no limit.
+- **"max. 12h směn za měsíc"** (EN: max 12-hour shifts per month). It replaces the general maximum of 3 for that person. Claimed holiday shifts still don't count toward it.
+- **"max. nočních za měsíc"** (EN: max nights per month). It limits that person's nights (N and N12) per month. Without it there is no limit.
 
 Both are musts when set. The numbers come later: two colleagues have offered to take extra nights, and the team lead is waiting for them to say how many nights a month and whether more than 2 weekends a month.
 

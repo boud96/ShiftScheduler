@@ -318,12 +318,12 @@
 **Interfaces:**
 - Produces: `OptionalNumberField(props: { label: string; value: number | null; min: number; max: number; placeholder: string; onChange(value: number | null): void })` in `form.tsx`. An empty box stores `null`; otherwise it follows `NumberField`'s rules.
 - Team card:
-  - `Max. 12h směn měsíčně` (0–10; placeholder `obecně ${maxTwelvePerMonth}`);
-  - `Max. nočních měsíčně` (0–31; placeholder `bez limitu`);
+  - `Max. 12h směn za měsíc` (0–10; placeholder `obecně ${maxTwelvePerMonth}`);
+  - `Max. nočních za měsíc` (0–31; placeholder `bez limitu`);
   - the starting-counts group title becomes `Počáteční počty (před prvním měsícem v souboru)`.
 - Rules screen:
   - `Max. dní v kuse` (4–7);
-  - `Min. víkendových směn měsíčně` (0–5);
+  - `Min. víkendových směn za měsíc` (0–5);
   - `Týdenní odpočinek (h)` (24–48, step 0.5);
   - the W10 select labelled `Směna mimo návštěvu lékaře`;
   - `WISH_IDS` includes `W10`, or is derived from `WISH_LABELS` (Phase 1 minor).

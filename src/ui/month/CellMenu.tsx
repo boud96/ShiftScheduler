@@ -27,12 +27,15 @@ const OTHER_CODES: readonly CodeInt[] = [Code.DOV, Code.MD, Code.OP, Code.NEM, C
 const GAP = 4;
 const MARGIN = 8;
 
+/** The end of the day, 24:00, in minutes from midnight: the latest that a note can end. */
+const END_OF_DAY = 24 * 60;
+
 /**
  * Minutes from midnight as the `HH:MM` that a time box takes: `clock` with the hour padded to two
  * digits. The box has no 24:00, so the end of the day, which a note can have, is shown as 23:59.
  */
 function inputTime(minutes: number): string {
-  return clock(Math.min(minutes, 24 * 60 - 1)).padStart(5, '0');
+  return clock(Math.min(minutes, END_OF_DAY - 1)).padStart(5, '0');
 }
 
 /**
@@ -96,9 +99,11 @@ export function CellMenu(props: CellMenuProps) {
   /** Where the cell was when the menu was put beside it. */
   const placedAt = useRef<{ top: number; left: number } | null>(null);
   /**
-   * Whether a button of the mouse is down on the cell, from its press to its release. A button
-   * takes the focus when it is pressed, and for the form that is no move out of it: the click on
-   * the cell is the cell's own, and closes the menu (`onCell`). See `onDialogBlur`.
+   * Whether the main button of the mouse is down on the cell, from its press to its release. A
+   * button takes the focus when it is pressed, and for the form that is no move out of it: the
+   * click on the cell is the cell's own, and closes the menu (`onCell`). See `onDialogBlur`. Only
+   * the main button clicks, and a context menu takes the release of a press (the page never sees
+   * it), so no other button is noted, and a context menu clears the press.
    */
   const pressingCell = useRef(false);
   /** Whether the form of the doctor's note has taken the place of the list. */
@@ -139,7 +144,7 @@ export function CellMenu(props: CellMenuProps) {
       const target = e.target;
       if (!(target instanceof Node)) return;
       if (anchor.current?.contains(target)) {
-        pressingCell.current = true;
+        if (e.button === 0) pressingCell.current = true;
         return;
       }
       if (box.current?.contains(target)) return;
@@ -169,12 +174,14 @@ export function CellMenu(props: CellMenuProps) {
     // The scroll of any box on the page reaches the window while it is captured.
     document.addEventListener('mousedown', outside);
     document.addEventListener('mouseup', released);
+    document.addEventListener('contextmenu', released);
     document.addEventListener('keydown', escape);
     window.addEventListener('resize', resized);
     window.addEventListener('scroll', scrolled, true);
     return () => {
       document.removeEventListener('mousedown', outside);
       document.removeEventListener('mouseup', released);
+      document.removeEventListener('contextmenu', released);
       document.removeEventListener('keydown', escape);
       window.removeEventListener('resize', resized);
       window.removeEventListener('scroll', scrolled, true);
@@ -317,7 +324,10 @@ function DoctorForm({ note, onSave, onRemove, onLeave, onResize }: DoctorFormPro
   const submit = (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault(); // first: the page has no form to send anywhere
     const start = minutesOf(from);
-    const end = minutesOf(to);
+    // A note that ends at the end of the day shows 23:59, and keeps its end while the box still
+    // does: a note saved with no change is the note it was.
+    const keepsEnd = note?.to === END_OF_DAY && to === inputTime(END_OF_DAY);
+    const end = keepsEnd ? END_OF_DAY : minutesOf(to);
     if (start === null || end === null) setProblem(doctor.missing);
     else if (start >= end) setProblem(doctor.order);
     else onSave({ from: start, to: end });

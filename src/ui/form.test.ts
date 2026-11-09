@@ -2,8 +2,22 @@
 import { fireEvent, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { createElement } from 'react';
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import type { MockInstance } from 'vitest';
 import { OptionalNumberField, storableNumber } from './form';
+
+// A warning from React, or an error from jsdom, would end up in the output: the tests fail on it.
+let errors: MockInstance;
+
+beforeEach(() => {
+  errors = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+});
+
+afterEach(() => {
+  const calls = [...errors.mock.calls];
+  vi.restoreAllMocks(); // the spies
+  expect(calls).toEqual([]);
+});
 
 // What a number box stores. The text is whatever the user typed or pasted; the answer is the number
 // to store, or null when the box must keep the number it has.

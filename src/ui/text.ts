@@ -97,10 +97,10 @@ export const TEAM_SCREEN = {
   /** The yearly days of each absence. */
   allowance: { DOV: 'Dovolená / rok', MD: 'MyDay / rok' },
   /** The limits of a person (spec 3.6). Each may be left empty. */
-  maxTwelve: 'Max. 12h směn měsíčně',
+  maxTwelve: 'Max. 12h směn za měsíc',
   /** In the empty box of the 12h limit: the general maximum, as the Rules screen has it. */
   maxTwelveGeneral: (general: number): string => `obecně ${general}`,
-  maxNights: 'Max. nočních měsíčně',
+  maxNights: 'Max. nočních za měsíc',
   /** In the empty box of the nights limit. */
   maxNightsNone: 'bez limitu',
   /**
@@ -208,7 +208,7 @@ export const RULES_SCREEN = {
   weeklyRest: 'Týdenní odpočinek (h)',
   maxDaysInRow: 'Max. dní v kuse',
   maxTwelve: 'Max. 12h směn za měsíc',
-  minWeekendShifts: 'Min. víkendových směn měsíčně',
+  minWeekendShifts: 'Min. víkendových směn za měsíc',
   twelveTarget: 'Cíl 12h směn za měsíc',
   timeBudget: 'Čas na generování (s)',
 };

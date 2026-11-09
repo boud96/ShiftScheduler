@@ -33,7 +33,7 @@ The end-to-end specs are in `tests/e2e`:
 - `plan-january.spec.ts`: starts a new plan and plans January 2027 with the real generator, in its worker, from the built file. Every day must be covered, `Kontrola` (Checks) must report no broken must, no request may leave, and no policy violation may show on the page (the spec sees only the page's own violations: one inside the generator's worker is blocked all the same, but not reported to it). It takes a few seconds, since the run has a time budget of 5 s.
 - `plan-quarter.spec.ts`: plans January, February and March 2027 in turn, as `plan-january.spec.ts` plans January, with 5 s for each run. Each month starts from the drafts of the months before it, and each must end with every day covered and no broken must; a failure names the musts that `Kontrola` finds broken. It takes about 17 s.
 - `doctor-form.spec.ts`: the form of a doctor's note (`Lékař…`, Doctor…) with a real keyboard and mouse: Tab and Shift+Tab through the parts of a time box, a click on the cell of the open form, Enter, and the form staying in the window. jsdom has no parts in a time box and does not show what a browser does with a press of the mouse, so only a browser tells.
-- `limit-box.spec.ts`: a letter typed into `Max. nočních měsíčně` (Max. nights per month) does not erase the limit: a 2 stays, and an empty box stays empty. `Kontrola` shows the limit at work, in its line about nights over it. A browser reports a box that holds a letter as empty, which jsdom does not.
+- `limit-box.spec.ts`: a letter typed into `Max. nočních za měsíc` (Max. nights per month) does not erase the limit: a 2 stays, and an empty box stays empty. `Kontrola` shows the limit at work, in its line about nights over it. A browser reports a box that holds a letter as empty, which jsdom does not.
 
 ## Deliver a build
 
@@ -91,7 +91,7 @@ The automated tests cannot cover other browsers, the operating system's dialogs 
 
 **A typo in a limit box, Firefox and Edge**
 
-- On the `Tým` (Team) tab, in `Max. nočních měsíčně` (Max. nights per month) holding 2, type a letter and leave the box: the 2 stays. In an empty one it stays empty, that is, no limit. A limit of nights is a rule that the generator never breaks, so a limit that a typo erased would let it give nights without a word.
+- On the `Tým` (Team) tab, in `Max. nočních za měsíc` (Max. nights per month) holding 2, type a letter and leave the box: the 2 stays. In an empty one it stays empty, that is, no limit. A limit of nights is a rule that the generator never breaks, so a limit that a typo erased would let it give nights without a word.
 
 **Excel paste of a note**
 

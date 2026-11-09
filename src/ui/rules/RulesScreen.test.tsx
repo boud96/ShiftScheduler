@@ -132,7 +132,7 @@ const NUMBERS = [
     invalid: ['0', '11', '2.5', '-1', '1e1', '3.0000000001', '2.9999999999'],
   },
   {
-    label: 'Min. víkendových směn měsíčně',
+    label: 'Min. víkendových směn za měsíc',
     key: 'minWeekendShifts',
     min: 0,
     max: 5,
@@ -306,7 +306,7 @@ describe('the screen', () => {
     expect(number('Týdenní odpočinek (h)')).toHaveValue(36.5);
     expect(number('Max. dní v kuse')).toHaveValue(5);
     expect(number('Max. 12h směn za měsíc')).toHaveValue(4);
-    expect(number('Min. víkendových směn měsíčně')).toHaveValue(3);
+    expect(number('Min. víkendových směn za měsíc')).toHaveValue(3);
     expect(number('Cíl 12h směn za měsíc')).toHaveValue(1);
     expect(number('Čas na generování (s)')).toHaveValue(45);
     WISHES.forEach(([, label], i) => {
@@ -344,7 +344,7 @@ describe('the screen', () => {
     expect(number('Týdenní odpočinek (h)')).toHaveValue(30);
     expect(number('Max. dní v kuse')).toHaveValue(7);
     expect(number('Max. 12h směn za měsíc')).toHaveValue(4);
-    expect(number('Min. víkendových směn měsíčně')).toHaveValue(0);
+    expect(number('Min. víkendových směn za měsíc')).toHaveValue(0);
     expect(number('Cíl 12h směn za měsíc')).toHaveValue(1);
     expect(number('Čas na generování (s)')).toHaveValue(60);
     expect(wish('Oblíbené směny')).toHaveDisplayValue('5 – hodně');

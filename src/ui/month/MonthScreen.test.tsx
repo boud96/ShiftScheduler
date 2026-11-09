@@ -877,6 +877,68 @@ describe("the doctor's note", () => {
     expect(toBox()).toHaveValue('23:59');
   });
 
+  describe('a note that ends at the end of the day', () => {
+    // The box shows it as 23:59, and a note saved with the box as it is still ends at 24:00.
+    it('keeps its end when it is saved with no change', async () => {
+      const data = plan(2);
+      putNote(data, MONDAY, 'A', 1200, 1440);
+      renderMonth(data);
+      await openForm('A', MONDAY);
+      expect(toBox()).toHaveValue('23:59');
+      await userEvent.click(button('Uložit lékaře'));
+      expect(storedNote(MONDAY, 'A')).toStrictEqual({ from: 1200, to: 1440 });
+      expect(cell('A', MONDAY).title).toContain('lékař 20:00–24:00');
+    });
+
+    it('keeps its end when only its start is changed', async () => {
+      const data = plan(2);
+      putNote(data, MONDAY, 'A', 1200, 1440);
+      renderMonth(data);
+      await openForm('A', MONDAY);
+      await userEvent.clear(fromBox());
+      await userEvent.type(fromBox(), '19:30');
+      await userEvent.click(button('Uložit lékaře'));
+      expect(storedNote(MONDAY, 'A')).toStrictEqual({ from: 1170, to: 1440 });
+    });
+
+    it('can be a note of the last minute, and saved as it is', async () => {
+      const data = plan(2);
+      putNote(data, MONDAY, 'A', 1439, 1440); // both boxes show 23:59
+      renderMonth(data);
+      await openForm('A', MONDAY);
+      await userEvent.click(button('Uložit lékaře'));
+      expect(screen.queryByRole('alert')).toBeNull();
+      expect(storedNote(MONDAY, 'A')).toStrictEqual({ from: 1439, to: 1440 });
+    });
+
+    it('ends where the box says once the end is changed, 23:59 typed again included', async () => {
+      const data = plan(2);
+      putNote(data, MONDAY, 'A', 1200, 1440);
+      renderMonth(data);
+      await openForm('A', MONDAY);
+      await userEvent.clear(toBox());
+      await userEvent.type(toBox(), '22:00');
+      await userEvent.click(button('Uložit lékaře'));
+      expect(storedNote(MONDAY, 'A')).toStrictEqual({ from: 1200, to: 1320 });
+
+      // a note that ended at 22:00 is not the end of the day when 23:59 is typed for it
+      await openForm('A', MONDAY);
+      await userEvent.clear(toBox());
+      await userEvent.type(toBox(), '23:59');
+      await userEvent.click(button('Uložit lékaře'));
+      expect(storedNote(MONDAY, 'A')).toStrictEqual({ from: 1200, to: 1439 });
+    });
+
+    it('is not made of a note that ends at 23:59', async () => {
+      const data = plan(2);
+      putNote(data, MONDAY, 'A', 1200, 1439);
+      renderMonth(data);
+      await openForm('A', MONDAY);
+      await userEvent.click(button('Uložit lékaře'));
+      expect(storedNote(MONDAY, 'A')).toStrictEqual({ from: 1200, to: 1439 });
+    });
+  });
+
   it('closes on Escape without storing, and gives the focus back to the cell', async () => {
     renderMonth(plan(2));
     await openForm('A', MONDAY);
@@ -1021,6 +1083,32 @@ describe("the doctor's note", () => {
     await openForm('A', MONDAY);
     fireEvent.mouseDown(cell('A', MONDAY));
     fireEvent.mouseUp(document.body); // let go elsewhere: no click on the cell, the form is open
+    expect(dialog()).toBeInTheDocument();
+    act(() => fromBox().focus());
+    await userEvent.tab({ shift: true });
+    expect(screen.queryByRole('dialog')).toBeNull();
+    expect(cell('A', MONDAY)).toHaveFocus();
+  });
+
+  // A button of the mouse is down on the cell, and the page never sees it let go: a context menu
+  // takes the release. The press must not stay in the page's memory, or a Shift+Tab onto the cell
+  // would be taken for the focus that the press brings.
+  it('closes on a Shift+Tab onto its cell after a right press on it, whose release is lost', async () => {
+    renderMonth(plan(2));
+    await openForm('A', MONDAY);
+    fireEvent.mouseDown(cell('A', MONDAY), { button: 2 });
+    expect(dialog()).toBeInTheDocument();
+    act(() => fromBox().focus());
+    await userEvent.tab({ shift: true });
+    expect(screen.queryByRole('dialog')).toBeNull();
+    expect(cell('A', MONDAY)).toHaveFocus();
+  });
+
+  it('closes on a Shift+Tab onto its cell after a press that a context menu took', async () => {
+    renderMonth(plan(2));
+    await openForm('A', MONDAY);
+    fireEvent.mouseDown(cell('A', MONDAY)); // the main button, as in a click with Ctrl on a Mac
+    fireEvent.contextMenu(cell('A', MONDAY));
     expect(dialog()).toBeInTheDocument();
     act(() => fromBox().focus());
     await userEvent.tab({ shift: true });
