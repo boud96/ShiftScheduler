@@ -16,13 +16,14 @@ import { search } from './search';
  *
  * 300,000 iterations are too few for the search to settle, so each run is a draw. Over seeds 1-24
  * the committed search passes these checks on every scenario 24/24 but doctor, 19/24 (over 1-96:
- * jan2027 96/96, doctor 73/96). Phase 1 passed jan2027 21/24, feb2027 22/24, dec2027 23/24 and
- * impossible 22/24; the Phase 1.1 rules took jan2027 down to 0/24 and dec2027 and impossible to
- * 9/24, until the exchange moves, the shifts that only one person can take in the first draft and
- * the shape of W5b. So after a change to the rules, the weights, construct or the moves, a red run
- * may be seed noise. Before changing a seed or an assertion, compare the pass rates over many seeds
- * before and after the change, and keep the change only if no scenario's rate drops. Never weaken
- * an assertion to make a seed pass.
+ * jan2027 96/96, doctor 73/96). q1-2027 checks every month for `Musí: 0` (no must unit) too, and
+ * passes 24/24. Phase 1 passed jan2027 21/24, feb2027 22/24, dec2027 23/24 and impossible 22/24;
+ * the Phase 1.1 rules took jan2027 down to 0/24 and dec2027 and impossible to 9/24, until the
+ * exchange moves, the shifts that only one person can take in the first draft and the shape of
+ * W5b. So after a change to the rules, the weights, construct or the moves, a red run may be seed
+ * noise. Before changing a seed or an assertion, compare the pass rates over many seeds before and
+ * after the change, and keep the change only if no scenario's rate drops. Never weaken an
+ * assertion to make a seed pass.
  *
  * SCENARIO_SEEDS (such as `1-24` or `1,5,7-9`) replaces the seeds of every scenario. A sweep, one
  * process per scenario:
@@ -324,8 +325,8 @@ describe('generator scenarios', () => {
   );
 
   it.each(seeds([1]))(
-    'q1-2027, seed %i: January to March one after another, each sound, and over the quarter ' +
-      'twelve-hour shifts within 2 of one another',
+    'q1-2027, seed %i: January to March one after another, each sound and with no must broken, ' +
+      'and over the quarter twelve-hour shifts within 2 of one another',
     async (seed) => {
       let data: AppData = scenario('q1-2027').data;
       const twelve = new Map<PersonId, number>(data.people.map((person) => [person.id, 0]));
@@ -340,6 +341,7 @@ describe('generator scenarios', () => {
         const r = await search(g.ctx, g.rows, g.fixed, { seed, maxIterations: ITERATIONS });
         const ev = evaluateMonth(g.ctx, r.rows, true);
         expectSound(g, r.rows, ev);
+        expect(ev.mustUnits, `${month}: ${musts(g, ev)}`).toBe(0); // Musí: 0, M6 and M12 included
         ev.persons.forEach((p, k) => {
           const id = g.personIds[k];
           twelve.set(id, (twelve.get(id) ?? 0) + p.twelve - p.claimedTwelve);
