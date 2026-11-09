@@ -190,8 +190,8 @@ describe('setDoctor', () => {
     expect(set(data, '2027-01-06', 'p1', null)).toBe(data);
   });
 
-  // The save file is refused with a note for someone who is not in the team, or a note that is
-  // not a stretch of one day: the reducer does not make one.
+  // The save file drops a note for someone who is not in the team, and is refused with a note that
+  // is not a stretch of one day: the reducer does not make either.
   it('ignores a person who is not in the team', () => {
     const data = planWithNotes();
     expect(set(data, '2027-01-04', 'zz', NOTE)).toBe(data);
@@ -639,8 +639,8 @@ describe('removePerson', () => {
     expect(remove('p5').doctor).toStrictEqual(data.doctor);
   });
 
-  // The file is refused for a note of someone who is not in the team (ruling R2), so a plan that
-  // was saved after the removal must still open.
+  // A note of someone who is not in the team is dropped when a file opens, so a plan that was
+  // saved after the removal must open as it was, with every note that is left.
   it('leaves a plan that still saves and opens, though the person had a note', () => {
     for (const personId of ['p1', 'p2', 'p5']) {
       const next = remove(personId);

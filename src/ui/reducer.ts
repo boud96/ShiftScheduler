@@ -25,7 +25,7 @@ export type Action =
   /**
    * Stores the doctor's note of a person on a day beside the day's cell, which it does not touch;
    * null deletes the note. A person who is not in the team, and a note that is not a time span of
-   * one day, are ignored: the save file is refused with either.
+   * one day, are ignored: the save file drops the note of the first, and is refused with the other.
    */
   | { type: 'setDoctor'; date: ISODate; personId: PersonId; note: DoctorNote | null }
   /** Pins a shift, or unpins a pinned one. Any other cell is left as it is. */
@@ -115,8 +115,8 @@ function setDoctor(
   personId: PersonId,
   note: DoctorNote | null,
 ): AppData {
-  // The save file is refused with a note for someone who is not in the team, or a note that is no
-  // time span (see `parseSaveFile`), so neither is stored.
+  // A note for someone who is not in the team is dropped by `parseSaveFile`, and one that is no
+  // time span makes it refuse the file, so neither is stored.
   if (note !== null && !(isTimeSpan(note) && data.people.some((p) => p.id === personId))) {
     return data;
   }
@@ -175,8 +175,8 @@ function dropAdjustment(meta: MonthMeta, personId: PersonId): MonthMeta {
 
 /**
  * The team without the person, and without what is kept for them: their cells, their doctor's
- * notes and their hours adjustments. The save file is refused with a note for someone who is not in
- * the team, so the notes must go with the person.
+ * notes and their hours adjustments. A note must not outlive its person: `data.doctor` holds notes
+ * of people in the team only, and `parseSaveFile` drops the others.
  */
 function removePerson(data: AppData, personId: PersonId): AppData {
   if (!data.people.some((p) => p.id === personId)) return data;

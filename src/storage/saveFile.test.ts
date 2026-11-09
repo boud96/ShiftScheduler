@@ -673,10 +673,8 @@ describe('save file version 2', () => {
       ['a date out of form', noteOn('2027-1-4')],
       ['a date with a time', noteOn('2027-01-04T00:00')],
       ['an empty date', noteOn('')],
-      ['a person who is not in the team',
-        (raw) => { raw.doctor['2027-01-04'].p99 = { from: 480, to: 720 }; }],
-      ['a person who was removed from the team',
-        (raw) => { raw.people = raw.people.filter((person: Raw) => person.id !== 'p3'); }],
+      ['a bad note of a person who is not in the team',
+        (raw) => { raw.doctor['2027-01-04'].p99 = { from: 720, to: 480 }; }],
       ['a day that is null', (raw) => { raw.doctor['2027-01-05'] = null; }],
       ['a day that is an array', (raw) => { raw.doctor['2027-01-05'] = []; }],
       ['a day that is text', (raw) => { raw.doctor['2027-01-05'] = 'p1'; }],
@@ -708,6 +706,38 @@ describe('save file version 2', () => {
     it('accepts a day without notes', () => {
       expect(parsedWith((raw) => { raw.doctor['2027-01-05'] = {}; }, planWithDoctor()).doctor)
         .toEqual({ ...planWithDoctor().doctor, '2027-01-05': {} });
+    });
+
+    it('drops the notes of a person who is not in the team', () => {
+      // p99 is nobody of the file, and has a note beside those of p1 and p2. p3 has left the file,
+      // with a note on a day of its own, and with cells. The other notes and every cell stay.
+      const parsed = parsedWith((raw) => {
+        raw.doctor['2027-01-04'].p99 = { from: 480, to: 720 };
+        raw.people = raw.people.filter((person: Raw) => person.id !== 'p3');
+      }, planWithDoctor());
+      const want = planWithDoctor();
+      want.people = want.people.filter((person) => person.id !== 'p3');
+      delete want.doctor['2027-01-19']; // the day held nothing else
+      expect(parsed).toEqual(want);
+      expect(parsed.doctor).toEqual({
+        '2027-01-04': { p1: { from: 480, to: 720 }, p2: { from: 1439, to: 1440 } },
+        '2027-02-10': { p1: { from: 0, to: 1 } },
+      });
+      expect(parsed.cells).toEqual(samplePlan().cells); // p3's N on 4 January included
+      expect(parseSaveFile(serialize(parsed))).toEqual(parsed); // and what is left is a plan
+    });
+
+    it('drops the notes of strangers from a day, and keeps a day that was empty already', () => {
+      const parsed = parsedWith((raw) => {
+        raw.doctor['2027-01-05'] = {};
+        raw.doctor['2027-01-06'] = { p98: { from: 60, to: 120 }, p99: { from: 120, to: 180 } };
+        raw.doctor['2027-01-07'] = { p98: { from: 60, to: 120 }, p2: { from: 60, to: 120 } };
+      }, planWithDoctor());
+      expect(parsed.doctor).toEqual({
+        ...planWithDoctor().doctor,
+        '2027-01-05': {},
+        '2027-01-07': { p2: { from: 60, to: 120 } },
+      });
     });
   });
 

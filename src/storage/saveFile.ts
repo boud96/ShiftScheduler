@@ -94,13 +94,31 @@ const isDoctorNote = (v: unknown): boolean =>
   v.from < v.to &&
   v.to <= MINUTES_PER_DAY;
 
-/** The notes of one day: each belongs to a person of the file, and is a real note. */
-const isDoctorDay = (v: unknown, personIds: ReadonlySet<string>): boolean =>
-  isObject(v) && Object.entries(v).every(([id, note]) => personIds.has(id) && isDoctorNote(note));
+/** The notes of one day: each is a real note, of whoever it is. */
+const isDoctorDay = (v: unknown): boolean => isObject(v) && Object.values(v).every(isDoctorNote);
 
-const isDoctor = (v: unknown, personIds: ReadonlySet<string>): v is AppData['doctor'] =>
-  isObject(v) &&
-  Object.entries(v).every(([date, day]) => isCalendarDate(date) && isDoctorDay(day, personIds));
+const isDoctor = (v: unknown): v is AppData['doctor'] =>
+  isObject(v) && Object.entries(v).every(([date, day]) => isCalendarDate(date) && isDoctorDay(day));
+
+/**
+ * The notes without those of people who are not in `personIds`, and without the days that this
+ * leaves empty; a day that was empty in the file stays. The app makes no such note, so one is a
+ * hand edit, and refusing the whole file for it would be the costliest answer to a harmless slip.
+ * The cells of such a person are kept as well.
+ */
+function withoutStrangers(
+  doctor: AppData['doctor'],
+  personIds: ReadonlySet<string>,
+): AppData['doctor'] {
+  const kept: AppData['doctor'] = {};
+  for (const [date, day] of Object.entries(doctor)) {
+    const notes = Object.entries(day);
+    const known = notes.filter(([id]) => personIds.has(id));
+    if (known.length === notes.length) kept[date] = day;
+    else if (known.length > 0) kept[date] = Object.fromEntries(known);
+  }
+  return kept;
+}
 
 /** `defaults` with the entries of `given` on top. Anything but an object counts as missing. */
 function fillIn<T extends object>(defaults: T, given: unknown): T {
@@ -163,11 +181,12 @@ function completePerson(given: Json & { id: string; name: string }): Person {
  * Reads the text of a save file. It throws a `SaveFileError` for a file that is not a plan, one
  * from a newer version of the app, or one that is damaged. The checks are what the app relies on
  * when it builds a month: people with their own ids, cells on real dates holding real codes,
- * doctor's notes on real dates, for people of the file and with a real time of day, months with a
- * status. A person is completed from the defaults where the file lacks an entry (see
- * `completePerson`), and so are the settings. Anything else is trusted as the app wrote it. Keys
- * the app does not know are dropped, so the result is exactly an `AppData`. A file the app wrote
- * always passes.
+ * doctor's notes on real dates with a real time of day, months with a status. A doctor's note of a
+ * person who is not in the file is dropped, not refused (a cell of such a person is kept): the app
+ * makes none, so it comes from a hand edit. A person is completed from the defaults where the file
+ * lacks an entry (see `completePerson`), and so are the settings. Anything else is trusted as the
+ * app wrote it. Keys the app does not know are dropped, so the result is exactly an `AppData`. A
+ * file the app wrote always passes.
  *
  * Version 1, which Phase 1 wrote, is opened too. It differs from version 2 only by what it lacks:
  * the doctor's notes, the limits of a person, three settings and the wish W10. All of them are
@@ -193,7 +212,7 @@ export function parseSaveFile(text: string): AppData {
     !isObject(settings) ||
     !isCells(cells) ||
     !isMonths(months) ||
-    !isDoctor(doctor, new Set(people.map((person) => person.id)))
+    !isDoctor(doctor)
   ) {
     throw new SaveFileError(CORRUPT);
   }
@@ -202,7 +221,7 @@ export function parseSaveFile(text: string): AppData {
     people: people.map(completePerson),
     settings: completeSettings(settings),
     cells,
-    doctor,
+    doctor: withoutStrangers(doctor, new Set(people.map((person) => person.id))),
     months,
   };
 }

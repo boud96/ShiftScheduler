@@ -997,8 +997,8 @@ describe("applyPaste, doctor's notes", () => {
     expect(applyPaste(d, { writes: [], ignored: [] }).doctor).toStrictEqual(d.doctor);
   });
 
-  // The save file is refused with a note for someone who is not in the team (`parseSaveFile`). A
-  // paste writes to the people of the month grid, who are all in `data.people`.
+  // `parseSaveFile` drops a note for someone who is not in the team. A paste writes to the people
+  // of the month grid, who are all in `data.people`.
   it('stores notes that a save file accepts: only for people of the team', () => {
     const { d, ids } = team();
     d.people[1].activeTo = '2026-12-31'; // B left before the month
