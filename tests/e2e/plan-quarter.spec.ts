@@ -1,7 +1,5 @@
 import { test, expect } from '@playwright/test';
-import path from 'node:path';
-
-const fileUrl = 'file://' + path.resolve('dist/index.html');
+import { fileUrl, monthNumber, POLICY_MESSAGE } from './support';
 
 /**
  * The first quarter of 2027 in the order it is planned: the title that the Month screen shows for
@@ -12,38 +10,6 @@ const QUARTER = [
   { title: 'Únor 2027', key: '2027-02', days: 28 },
   { title: 'Březen 2027', key: '2027-03', days: 31 },
 ];
-
-/** The names of the months as the heading of the Month screen spells them. */
-const MONTH_NAMES = [
-  'Leden',
-  'Únor',
-  'Březen',
-  'Duben',
-  'Květen',
-  'Červen',
-  'Červenec',
-  'Srpen',
-  'Září',
-  'Říjen',
-  'Listopad',
-  'Prosinec',
-];
-
-// What the browser prints when the page's Content Security Policy stops something (see
-// plan-january.spec.ts, and csp.spec.ts for the proof that this matches what Chromium prints).
-// Chromium reports only the page's own violations there. One inside the generator's worker is
-// blocked all the same, but not reported.
-const POLICY_MESSAGE = /\bCSP\b|security[\s-]policy/i;
-
-/** A heading such as `Leden 2027` as a number of months, to tell which way to step. */
-function monthNumber(heading: string): number {
-  const [name, year] = heading.trim().split(' ');
-  const index = MONTH_NAMES.indexOf(name);
-  if (index < 0 || !/^\d{4}$/.test(year)) {
-    throw new Error(`Not the heading of a month: "${heading}"`);
-  }
-  return Number(year) * 12 + index;
-}
 
 // plan-january.spec.ts plans one month. A quarter is planned month by month, and each run starts
 // from the drafts of the months before it: the rest and the days in a row across the boundary, and

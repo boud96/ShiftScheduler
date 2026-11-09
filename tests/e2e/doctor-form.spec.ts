@@ -1,12 +1,6 @@
 import { test, expect } from '@playwright/test';
 import type { Page } from '@playwright/test';
-import path from 'node:path';
-
-const fileUrl = 'file://' + path.resolve('dist/index.html');
-
-// What the browser prints when the page's Content Security Policy stops something (see
-// plan-january.spec.ts, and csp.spec.ts for the proof that this matches what Chromium prints).
-const POLICY_MESSAGE = /\bCSP\b|security[\s-]policy/i;
+import { fileUrl, POLICY_MESSAGE } from './support';
 
 // jsdom has no hour and minute parts in a time box, so only a browser can tell how Tab and
 // Shift+Tab move in the form of the doctor's note: in Chromium a press of Tab goes from the hour
@@ -97,7 +91,20 @@ test('a click on another cell opens its list, and a click on the heading closes 
   page,
 }) => {
   const { month, dialog } = await openForm(page);
-  await month.locator('[data-testid^="cell-p2-"]').nth(10).click();
+  // The form lies under the cell of p1, over the four cells below it (the 10th to the 13th of the
+  // row of p2). The 18th is clear of it, in the window at this size, and not under the totals,
+  // which the 25th is: Playwright would scroll the grid to a cell that is covered, and the scroll
+  // closes the form by itself. So the click is checked to land on the cell.
+  const other = month.locator('[data-testid^="cell-p2-"]').nth(18);
+  const box = await other.boundingBox();
+  if (box === null) throw new Error('the cell has a box');
+  const top = await page.evaluate(
+    ([x, y]) =>
+      document.elementFromPoint(x, y)?.closest('[data-testid]')?.getAttribute('data-testid'),
+    [box.x + box.width / 2, box.y + box.height / 2],
+  );
+  expect(top, 'nothing covers the cell').toBe(await other.getAttribute('data-testid'));
+  await other.click();
   await expect(dialog).toBeHidden();
   await expect(page.getByRole('menu', { name: /^Operátor 2 · / })).toBeVisible();
 

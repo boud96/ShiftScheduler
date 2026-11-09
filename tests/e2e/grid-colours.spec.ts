@@ -1,7 +1,5 @@
 import { test, expect } from '@playwright/test';
-import path from 'node:path';
-
-const fileUrl = 'file://' + path.resolve('dist/index.html');
+import { fileUrl } from './support';
 
 // --danger-bg and --danger-text of the style sheet, as the browser computes them.
 const DANGER_BG = 'rgb(253, 232, 232)';

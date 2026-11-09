@@ -1,16 +1,13 @@
 import { test, expect } from '@playwright/test';
-import path from 'node:path';
-
-const fileUrl = 'file://' + path.resolve('dist/index.html');
+import { fileUrl, POLICY_MESSAGE } from './support';
 
 // A made-up address: ".invalid" never resolves. It is not meant to be reached, and it cannot be:
 // the route below answers for every http(s) request, so nothing leaves the machine even if the
 // policy did not hold.
 const PROBE_URL = 'https://probe.invalid/ping';
 
-// What the browser prints when the page's Content Security Policy stops something. The January
-// spec looks for violations with the same pattern, so this test also shows that it matches.
-const POLICY_MESSAGE = /\bCSP\b|security[\s-]policy/i;
+// The specs look for the violations that the browser prints (POLICY_MESSAGE in support.ts), so this
+// test also shows that the pattern matches what Chromium prints.
 
 test('the built page carries a CSP that the browser enforces, so nothing can leave it', async ({
   page,

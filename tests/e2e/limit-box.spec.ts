@@ -1,8 +1,6 @@
 import { test, expect } from '@playwright/test';
 import type { Locator, Page } from '@playwright/test';
-import path from 'node:path';
-
-const fileUrl = 'file://' + path.resolve('dist/index.html');
+import { fileUrl } from './support';
 
 // A number box that holds a letter has no value in a browser: the value is the empty text, the same
 // as that of an empty box, and only `validity.badInput` tells them apart. A page that took the
@@ -67,6 +65,9 @@ test('a letter typed over a limit of 2 is not kept: the box and the limit stay 2
   await expect(nightsLine(page)).toHaveText(/^Operátor 1 · .+: 3 noční \(max\. 2\)$/);
 
   await show(page, 'Tým');
+  // The letter is `e` because Chromium and Edge let only `e`, `E`, `+`, `-` and `.` into a number
+  // box (the `e` is for an exponent): any other letter, such as `a`, never gets in, so typing it
+  // would leave the box as it was and test nothing.
   await limit.press('e');
   // The letter is in the box, which has no value for it: that is what the page has to tell from an
   // emptied box.
@@ -109,7 +110,7 @@ test('a letter typed into an empty limit box is not kept: it stays empty, with n
 
   await show(page, 'Tým');
   await expect(limit).toHaveValue('');
-  await limit.press('e');
+  await limit.press('e'); // an `e`, not another letter: only a few characters get into the box
   expect(await showsLetter(limit), 'the letter is shown in the box').toBe(true);
   await limit.blur();
   await expect(limit).toHaveValue('');

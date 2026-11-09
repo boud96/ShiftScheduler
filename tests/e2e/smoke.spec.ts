@@ -1,8 +1,6 @@
 import { test, expect } from '@playwright/test';
-import path from 'node:path';
 import fs from 'node:fs';
-
-const fileUrl = 'file://' + path.resolve('dist/index.html');
+import { fileUrl } from './support';
 
 test('built file opens from disk without any network request', async ({ page }) => {
   const requests: string[] = [];
