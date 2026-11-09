@@ -1,0 +1,70 @@
+# Builds the app on every push and pull request: the typecheck, the unit tests, the browser tests
+# and the single-file build, which the run keeps as a download for 30 days. A version tag such as
+# v1.1.0 also publishes a GitHub Release with the built file attached, named after the version.
+name: Build
+
+on:
+  push:
+    branches: ['**']
+    tags: ['v*']
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm test
+      - run: npx playwright install --with-deps chromium
+      # Builds dist/index.html, then runs the browser tests against it.
+      - run: npm run test:e2e
+      - uses: actions/upload-artifact@v4
+        with:
+          name: planovani-smen
+          path: dist/index.html
+          if-no-files-found: error
+          retention-days: 30
+
+  release:
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: planovani-smen
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          version="${TAG#v}"
+          file="planovani-smen-${version}.html"
+          mv index.html "$file"
+          cat > notes.md <<EOF
+          Jak aplikaci vyzkoušet:
+
+          1. Stáhněte soubor ${file} (níže v části Assets).
+          2. Otevřete ho dvojklikem v Edge nebo Chrome. Aplikace běží offline a nic neodesílá.
+          3. Klikněte na Začít nový, pak hned na Uložit do souboru a vyberte složku pro soubor s plánem.
+
+          Data zůstávají jen ve vašem počítači: v souboru s plánem a v prohlížeči. Otevírejte vždy nejnovější staženou verzi.
+          EOF
+          gh release create "$TAG" "$file" --repo "$GITHUB_REPOSITORY" --title "Plánování směn ${version}" --notes-file notes.md
